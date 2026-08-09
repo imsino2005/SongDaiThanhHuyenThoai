@@ -91,8 +91,8 @@ class GameScene extends Phaser.Scene {
       damage: Math.round(this.classData.baseStats.damage * upgradeMul('damage')),
       attackSpeed: 1,
       armor: 0,
-      pickupRange: 90,
-      xpGain: 1,
+      pickupRange: Math.round(90 * upgradeMul('pickupRange')),
+      xpGain: 1 * upgradeMul('xpGain'),
       crit: 0.05,
       area: 1,
       lifesteal: 0
@@ -110,6 +110,9 @@ class GameScene extends Phaser.Scene {
     this.xp = 0;
     this.xpToNext = 18;
     this.kills = 0;
+    this.killStreak = 0;
+    this.killStreakTimer = 0;
+    this.killStreakWindowMs = 2600; // giết tiếp trong 2.6s để giữ combo, quá thời gian sẽ reset
     this.bossKills = 0;
     this.chestsOpened = 0;
     this.timeAlive = 0;
@@ -281,12 +284,17 @@ class GameScene extends Phaser.Scene {
       fontSize: '14px', color: '#ff9999', fontFamily: 'Segoe UI'
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(102);
 
-    this.classText = this.add.text(w - 16, 70, this.classData.name, {
+    // Combo/Kill Streak - chỉ hiện khi đang có streak (>=2), tự ẩn khi hết combo
+    this.comboText = this.add.text(w - 16, 68, '', {
+      fontSize: '13px', color: '#ffd166', fontFamily: 'Segoe UI', fontStyle: 'bold'
+    }).setOrigin(1, 0).setScrollFactor(0).setDepth(102).setVisible(false);
+
+    this.classText = this.add.text(w - 16, 92, this.classData.name, {
       fontSize: '14px', color: '#aaccff', fontFamily: 'Segoe UI'
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(102);
 
     // Aim mode indicator (toggle bằng Shift trái)
-    this.aimText = this.add.text(w - 16, 92, 'Aim: AUTO (Shift)', {
+    this.aimText = this.add.text(w - 16, 114, 'Aim: AUTO (Shift)', {
       fontSize: '12px', color: '#88ddff', fontFamily: 'Segoe UI'
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(102);
 
@@ -405,6 +413,7 @@ class GameScene extends Phaser.Scene {
     this.updateEnemies(delta);
     this.attractGems();
     this.updateHpRegen(delta);
+    this.updateKillStreak(delta);
     this.updateUI();
     this.updateMinimap();
     this.updateAimCrosshair();
@@ -417,6 +426,39 @@ class GameScene extends Phaser.Scene {
     while (this.hpRegenTimer >= 1000) {
       this.hpRegenTimer -= 1000;
       this.stats.hp = Math.min(this.stats.maxHp, this.stats.hp + HP_REGEN_PER_SEC);
+    }
+  }
+
+  // ========== KILL STREAK / COMBO ==========
+  // Đếm số quái giết liên tục trong khoảng killStreakWindowMs. Hết thời gian mà
+  // không giết thêm quái nào -> streak reset về 0 và ẩn chữ combo trên HUD.
+  updateKillStreak(delta) {
+    if (this.killStreak <= 0) return;
+    this.killStreakTimer -= delta;
+    if (this.killStreakTimer <= 0) {
+      this.killStreak = 0;
+      if (this.comboText) this.comboText.setVisible(false);
+    }
+  }
+
+  registerKillStreak() {
+    this.killStreak++;
+    this.killStreakTimer = this.killStreakWindowMs;
+
+    if (this.comboText) {
+      this.comboText.setText(`🔥 Combo x${this.killStreak}`);
+      this.comboText.setVisible(true);
+    }
+
+    // Mốc đáng ăn mừng - hiện chữ nổi ở giữa nhân vật + rung nhẹ camera + phóng to combo text.
+    if (this.killStreak >= 3 && this.killStreak % 5 === 0) {
+      const milestoneColor = this.killStreak >= 20 ? '#ff4466' : (this.killStreak >= 10 ? '#ff9944' : '#ffee44');
+      this.showFloatingText(this.player.x, this.player.y - 55, `COMBO x${this.killStreak}!`, milestoneColor);
+      this.cameras.main.shake(60, 0.004);
+      if (this.comboText) {
+        this.comboText.setScale(1.4);
+        this.tweens.add({ targets: this.comboText, scale: 1, duration: 220, ease: 'Back.easeOut' });
+      }
     }
   }
 
@@ -1454,6 +1496,7 @@ class GameScene extends Phaser.Scene {
 
   killEnemy(enemy) {
     this.kills++;
+    this.registerKillStreak();
     if (enemy.isBoss) this.bossKills++;
     const gem = this.gems.create(enemy.x, enemy.y, 'gem');
     gem.setDepth(3);

@@ -17,6 +17,16 @@ const UPGRADE_DEFS = {
     key: 'agility_boost', name: 'Nhanh Nhẹn', icon: '💨', statKey: 'speed',
     bonusPerLevel: 0.03, maxLevel: 10, basePrice: 80, priceGrowth: 1.35,
     description: 'Tăng 3% tốc độ di chuyển mỗi cấp.'
+  },
+  wisdom_boost: {
+    key: 'wisdom_boost', name: 'Thông Thái', icon: '📖', statKey: 'xpGain',
+    bonusPerLevel: 0.05, maxLevel: 10, basePrice: 90, priceGrowth: 1.35,
+    description: 'Tăng 5% lượng EXP nhận được mỗi cấp.'
+  },
+  magnetism_boost: {
+    key: 'magnetism_boost', name: 'Từ Trường', icon: '🧲', statKey: 'pickupRange',
+    bonusPerLevel: 0.08, maxLevel: 10, basePrice: 70, priceGrowth: 1.3,
+    description: 'Tăng 8% tầm hút vật phẩm mỗi cấp.'
   }
 };
 

@@ -9,7 +9,9 @@ const router = express.Router();
 const upgradeCatalog = [
   { itemKey: 'power_boost', itemType: 'upgrade', title: 'Suc Manh', statKey: 'damage', bonusPerLevel: 0.04, maxLevel: 10, basePrice: 80, priceGrowth: 1.35, description: 'Tang 4% sat thuong gay ra moi cap.' },
   { itemKey: 'vitality_boost', itemType: 'upgrade', title: 'Sinh Luc', statKey: 'maxHp', bonusPerLevel: 0.05, maxLevel: 10, basePrice: 80, priceGrowth: 1.35, description: 'Tang 5% mau toi da moi cap.' },
-  { itemKey: 'agility_boost', itemType: 'upgrade', title: 'Nhanh Nhen', statKey: 'speed', bonusPerLevel: 0.03, maxLevel: 10, basePrice: 80, priceGrowth: 1.35, description: 'Tang 3% toc do di chuyen moi cap.' }
+  { itemKey: 'agility_boost', itemType: 'upgrade', title: 'Nhanh Nhen', statKey: 'speed', bonusPerLevel: 0.03, maxLevel: 10, basePrice: 80, priceGrowth: 1.35, description: 'Tang 3% toc do di chuyen moi cap.' },
+  { itemKey: 'wisdom_boost', itemType: 'upgrade', title: 'Thong Thai', statKey: 'xpGain', bonusPerLevel: 0.05, maxLevel: 10, basePrice: 90, priceGrowth: 1.35, description: 'Tang 5% luong EXP nhan duoc moi cap.' },
+  { itemKey: 'magnetism_boost', itemType: 'upgrade', title: 'Tu Truong', statKey: 'pickupRange', bonusPerLevel: 0.08, maxLevel: 10, basePrice: 70, priceGrowth: 1.3, description: 'Tang 8% tam hut vat pham moi cap.' }
 ];
 
 function priceForLevel(def, currentLevel) {
