@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Sống Đại Thành Huyền Thoại</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #0a0a12;
+      overflow: hidden;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    #game-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    canvas {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+    }
+    html, body { touch-action: none; -webkit-tap-highlight-color: transparent; }
+
+    /* ---- Touch joystick (chỉ hiện khi có ngón tay chạm vào #joyZone) ---- */
+    #joyZone {
+      position: fixed; left: 0; bottom: 0;
+      width: 46vw; height: 46vh;
+      z-index: 500; touch-action: none;
+      display: none; /* GameScene bật khi đang chơi, tắt khi ở menu/pause/level-up để không chặn UI */
+    }
+    #joyBase {
+      position: absolute; width: 110px; height: 110px; border-radius: 50%;
+      background: rgba(255,255,255,0.06); border: 2px solid rgba(150,150,255,0.55);
+      display: none; pointer-events: none;
+    }
+    #joyStick {
+      position: absolute; width: 50px; height: 50px; border-radius: 50%;
+      background: rgba(120,140,255,0.55); border: 2px solid rgba(150,170,255,0.9);
+      display: none; pointer-events: none; box-shadow: 0 0 14px rgba(120,140,255,0.6);
+    }
+    /* Nút pause chạm được trên mobile (song song phím ESC/P) */
+    #touchPauseBtn {
+      position: fixed; top: 96px; right: 12px; z-index: 501;
+      width: 42px; height: 42px; border-radius: 50%;
+      background: rgba(10,10,20,0.55); border: 1px solid rgba(255,255,255,0.25);
+      color: #fff; font-size: 16px; display: none; align-items: center; justify-content: center;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body.is-touch #touchPauseBtn { display: flex; }
+  </style>
+</head>
+<body>
+  <div id="game-container"></div>
+
+  <!-- Vùng điều khiển joystick ảo (góc trái dưới) -->
+  <div id="joyZone">
+    <div id="joyBase"></div>
+    <div id="joyStick"></div>
+  </div>
+  <button id="touchPauseBtn">❚❚</button>
+
+  <!-- Phaser 3 CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+
+  <!-- Game Scripts -->
+  <script src="js/config.js"></script>
+  <script src="js/touch.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/enemy.js"></script>
+  <script src="js/weapon.js"></script>
+  <script src="js/scenes/BootScene.js"></script>
+  <script src="js/scenes/TitleScene.js"></script>
+  <script src="js/scenes/ClassSelectScene.js"></script>
+  <script src="js/scenes/GameScene.js"></script>
+  <script src="js/scenes/ResultScene.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/main.js"></script>
+  <script>
+    if (IS_TOUCH_DEVICE) document.body.classList.add('is-touch');
+    window.addEventListener('resize', () => {
+      game.scale.resize(window.innerWidth, window.innerHeight);
+    });
+    document.getElementById('touchPauseBtn').addEventListener('click', () => {
+      const scene = game.scene.getScene('GameScene');
+      if (scene && scene.scene.isActive()) scene.togglePause();
+    });
+  </script>
+</body>
+</html>
