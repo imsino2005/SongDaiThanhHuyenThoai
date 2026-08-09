@@ -5,10 +5,13 @@ const { verifyJwt } = require('../middleware/auth');
 const router = express.Router();
 
 // Cong thuc tinh Gold thuong sau moi van choi, dua tren diem/so quai/level dat duoc.
+// Da giam he so so voi truoc (base /10 -> /25, killBonus 2 -> 1, levelBonus 5 -> 2)
+// vi Gold gio dung de mua Nang Cap vinh vien (tang dame/mau/toc do) thay vi Aura
+// trang tri, nen can lam cho toc do kiem tien / len cap cham hon de can bang.
 function calculateGoldReward({ score, kills, levelReached }) {
-  const base = Math.floor((score || 0) / 10);
-  const killBonus = (kills || 0) * 2;
-  const levelBonus = (levelReached || 1) * 5;
+  const base = Math.floor((score || 0) / 25);
+  const killBonus = Math.floor((kills || 0) * 1);
+  const levelBonus = (levelReached || 1) * 2;
   return Math.max(0, base + killBonus + levelBonus);
 }
 

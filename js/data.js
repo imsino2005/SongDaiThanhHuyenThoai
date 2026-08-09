@@ -1,12 +1,29 @@
-// ====================== AURA DATA (Shop) ======================
-// Mỗi aura là 1 hiệu ứng vòng hào quang bao quanh nhân vật, mua bằng Gold trong Shop,
-// trang bị (equip) 1 cái tại 1 thời điểm, hiển thị trong lúc chơi thật.
-const AURA_DEFS = {
-  aura_fire: { key: 'aura_fire', name: 'Hào Quang Lửa', color: 0xff5533, price: 150, description: 'Vòng lửa đỏ cam bao quanh nhân vật.' },
-  aura_ice: { key: 'aura_ice', name: 'Hào Quang Băng', color: 0x55ddff, price: 150, description: 'Vòng băng xanh lạnh bao quanh nhân vật.' },
-  aura_thunder: { key: 'aura_thunder', name: 'Hào Quang Sấm Sét', color: 0xb84dff, price: 200, description: 'Vòng điện tím bao quanh nhân vật.' },
-  aura_holy: { key: 'aura_holy', name: 'Hào Quang Thần Thánh', color: 0xffe066, price: 300, description: 'Vòng ánh sáng vàng kim bao quanh nhân vật.' }
+// ====================== UPGRADE DATA (Shop) ======================
+// Nâng cấp vĩnh viễn mua bằng Gold trong Shop, cộng dồn theo cấp (level),
+// áp dụng cho MỌI nhân vật/lượt chơi sau khi mua (đọc lại lúc vào GameScene).
+// Giá tăng dần theo cấp hiện có: price(level) = round(basePrice * priceGrowth^level).
+const UPGRADE_DEFS = {
+  power_boost: {
+    key: 'power_boost', name: 'Sức Mạnh', icon: '⚔️', statKey: 'damage',
+    bonusPerLevel: 0.04, maxLevel: 10, basePrice: 80, priceGrowth: 1.35,
+    description: 'Tăng 4% sát thương gây ra mỗi cấp.'
+  },
+  vitality_boost: {
+    key: 'vitality_boost', name: 'Sinh Lực', icon: '❤️', statKey: 'maxHp',
+    bonusPerLevel: 0.05, maxLevel: 10, basePrice: 80, priceGrowth: 1.35,
+    description: 'Tăng 5% máu tối đa mỗi cấp.'
+  },
+  agility_boost: {
+    key: 'agility_boost', name: 'Nhanh Nhẹn', icon: '💨', statKey: 'speed',
+    bonusPerLevel: 0.03, maxLevel: 10, basePrice: 80, priceGrowth: 1.35,
+    description: 'Tăng 3% tốc độ di chuyển mỗi cấp.'
+  }
 };
+
+// Trả về giá Gold cần trả để mua cấp tiếp theo, dựa trên cấp hiện đang sở hữu.
+function getUpgradePrice(def, currentLevel) {
+  return Math.round(def.basePrice * Math.pow(def.priceGrowth, currentLevel));
+}
 
 // ====================== CLASS DATA ======================
 const CLASSES = {
@@ -47,7 +64,7 @@ const CLASSES = {
 // ====================== ACHIEVEMENTS ======================
 // Mỗi thành tựu có key (định danh lưu ở server), title/description hiển thị,
 // và check(stats) chạy ở client khi kết thúc trận (GameScene -> ResultScene)
-// để xác định trận vừa rồi có đạt điều kiện hay không. Vài thành tựu (vd mua Aura)
+// để xác định trận vừa rồi có đạt điều kiện hay không. Vài thành tựu (vd mua nâng cấp)
 // không dựa trên stats 1 trận nên check() luôn trả false — được mở khoá thủ công
 // ở đúng chỗ xảy ra hành động đó (vd trong Shop khi mua thành công).
 const ACHIEVEMENT_DEFS = [
@@ -131,7 +148,7 @@ const ACHIEVEMENT_DEFS = [
   {
     key: 'first_purchase',
     title: 'Khách Sộp',
-    description: 'Mua thành công 1 Hào Quang tại Kho Đồ.',
+    description: 'Mua thành công 1 cấp Nâng Cấp tại Kho Đồ.',
     icon: '🛍️',
     check: () => false
   }

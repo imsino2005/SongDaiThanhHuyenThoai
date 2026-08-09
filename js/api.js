@@ -97,10 +97,6 @@ const AuthAPI = {
     return this.request('/shop/purchase', { method: 'POST', body: { itemKey } });
   },
 
-  async equipAura(itemKey) {
-    return this.request('/shop/equip', { method: 'POST', body: { itemKey } });
-  },
-
   async getAchievements() {
     return this.request('/achievements');
   },
@@ -505,16 +501,11 @@ const AuthAPI = {
       this.hideModal();
     });
 
-    // Làm mới Gold + aura đã trang bị trong nền (không chặn hiển thị menu),
-    // để nếu người dùng vừa trang bị/mua ở máy khác thì vẫn thấy đúng khi vào lại.
+    // Làm mới Gold trong nền (không chặn hiển thị menu), để nếu người dùng
+    // vừa mua nâng cấp ở máy khác thì vẫn thấy đúng số dư khi vào lại.
     if (this.token && this.user && !this.user.guest) {
       this.getProfile().then(({ profile }) => {
         this.updateLocalGold(profile.gold);
-        try {
-          const parsed = JSON.parse(profile.jsonProfile || '{}');
-          this.user.equippedAura = parsed.equippedAura || null;
-          localStorage.setItem('vs_user', JSON.stringify(this.user));
-        } catch (e) { /* bỏ qua nếu jsonProfile lỗi định dạng */ }
         const goldEl = this.contentArea.querySelector('#menuGoldLabel');
         if (goldEl) goldEl.textContent = `🪙 ${this.user.gold ?? 0} Gold`;
       }).catch(() => { /* im lặng bỏ qua, không làm phiền người dùng vì lỗi nền */ });
@@ -620,76 +611,51 @@ const AuthAPI = {
   },
 
   async renderShop() {
-    this.modal.querySelector('#authModalTitle').textContent = 'Kho Đồ - Aura';
+    this.modal.querySelector('#authModalTitle').textContent = 'Kho Đồ - Nâng Cấp';
     this.contentArea.innerHTML = '<p>Loading shop...</p>';
     try {
       const catalogData = await this.getCatalog();
       const inventoryData = this.token ? await this.getInventory() : { inventory: [] };
-      let equippedAura = null;
       if (this.token) {
         try {
           const { profile } = await this.getProfile();
           this.updateLocalGold(profile.gold);
-          const parsed = JSON.parse(profile.jsonProfile || '{}');
-          equippedAura = parsed.equippedAura || null;
-          if (this.user) {
-            this.user.equippedAura = equippedAura;
-            localStorage.setItem('vs_user', JSON.stringify(this.user));
-          }
-        } catch (e) { /* jsonProfile trống hoặc lỗi parse - bỏ qua */ }
+        } catch (e) { /* lỗi mạng - bỏ qua, dùng số Gold đã có sẵn */ }
       }
 
       const myGold = this.user && !this.user.guest ? (this.user.gold ?? 0) : 0;
-      const ownedKeys = new Set(inventoryData.inventory.map(i => i.itemKey));
       const loggedIn = !!(this.token && this.user && !this.user.guest);
-
-      const swatch = (color) => `<span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#${color.toString(16).padStart(6, '0')};box-shadow:0 0 8px #${color.toString(16).padStart(6, '0')};vertical-align:middle;margin-right:8px;"></span>`;
+      const levelByKey = {};
+      inventoryData.inventory.forEach(i => { levelByKey[i.itemKey] = i.quantity; });
 
       const catalogRows = catalogData.catalog.map(item => {
-        const def = AURA_DEFS[item.itemKey];
-        const owned = ownedKeys.has(item.itemKey);
-        const canAfford = loggedIn && myGold >= item.price;
-        let action = `<button class="shopBuyBtn" data-key="${item.itemKey}">Mua</button>`;
+        const def = typeof UPGRADE_DEFS !== 'undefined' ? UPGRADE_DEFS[item.itemKey] : null;
+        const currentLevel = levelByKey[item.itemKey] || 0;
+        const maxed = currentLevel >= item.maxLevel;
+        const nextPrice = Math.round(item.basePrice * Math.pow(item.priceGrowth, currentLevel));
+        const canAfford = loggedIn && myGold >= nextPrice;
+        let action;
         if (!loggedIn) action = `<button disabled title="Đăng nhập để mua">Mua</button>`;
-        else if (owned) action = `<span style="color:#8affb0;">Đã sở hữu</span>`;
+        else if (maxed) action = `<span style="color:#8affb0;">Tối đa</span>`;
         else if (!canAfford) action = `<button disabled title="Không đủ Gold">Không đủ Gold</button>`;
+        else action = `<button class="shopBuyBtn" data-key="${item.itemKey}">Mua • 🪙 ${nextPrice}</button>`;
         return `
         <tr>
-          <td>${def ? swatch(def.color) : ''}${item.title}</td>
-          <td>🪙 ${item.price}</td>
+          <td>${def ? def.icon + ' ' : ''}${item.title}</td>
+          <td>${currentLevel} / ${item.maxLevel}</td>
           <td>${item.description}</td>
           <td>${action}</td>
         </tr>
       `;
       }).join('');
 
-      const invRows = inventoryData.inventory.length
-        ? inventoryData.inventory.map(item => {
-            const def = AURA_DEFS[item.itemKey];
-            const isEquipped = equippedAura === item.itemKey;
-            const equipBtn = isEquipped
-              ? `<button class="auraUnequipBtn">Đang dùng • Tháo ra</button>`
-              : `<button class="auraEquipBtn" data-key="${item.itemKey}">Trang bị</button>`;
-            return `
-        <tr${isEquipped ? ' style="background:rgba(108,92,231,0.25);"' : ''}>
-          <td>${def ? swatch(def.color) : ''}${def ? def.name : item.itemKey}</td>
-          <td>${equipBtn}</td>
-        </tr>
-      `;
-          }).join('')
-        : `<tr><td colspan="2" style="color:#a0a0c0;">${loggedIn ? 'Chưa sở hữu Aura nào — mua ở bảng trên.' : 'Đăng nhập để xem kho đồ.'}</td></tr>`;
-
       this.contentArea.innerHTML = `
         <p style="color:#f7d774; font-weight:600; margin-bottom:12px;">🪙 Số dư của bạn: ${loggedIn ? myGold : '—'} Gold</p>
-        <div><strong>Cửa hàng Aura</strong></div>
+        <p style="color:#a0a0c0; font-size:13px; margin-bottom:10px;">Nâng cấp vĩnh viễn, cộng dồn theo cấp, áp dụng cho mọi lượt chơi. Giá tăng dần mỗi cấp.</p>
+        <div><strong>Cửa hàng Nâng Cấp</strong></div>
         <table class="authTable">
-          <thead><tr><th>Aura</th><th>Giá</th><th>Mô tả</th><th>Hành động</th></tr></thead>
+          <thead><tr><th>Nâng cấp</th><th>Cấp</th><th>Mô tả</th><th>Hành động</th></tr></thead>
           <tbody>${catalogRows}</tbody>
-        </table>
-        <div style="margin-top:18px;"><strong>Kho đồ của bạn</strong></div>
-        <table class="authTable">
-          <thead><tr><th>Aura</th><th>Trang bị</th></tr></thead>
-          <tbody>${invRows}</tbody>
         </table>
         <div class="authResult" id="authShopFeedback"></div>
       `;
@@ -703,7 +669,7 @@ const AuthAPI = {
             this.updateLocalGold(result.goldBalance);
             feedback.style.color = '#8affb0';
             feedback.textContent = 'Mua thành công!';
-            // Mở khóa thành tựu "Khách Sộp" (mua Aura đầu tiên) — findOrCreate ở
+            // Mở khóa thành tựu "Khách Sộp" (mua nâng cấp đầu tiên) — findOrCreate ở
             // server tự bỏ qua nếu đã mở khóa từ trước, gọi lại vô hại.
             if (typeof ACHIEVEMENT_DEFS !== 'undefined') {
               const def = ACHIEVEMENT_DEFS.find(a => a.key === 'first_purchase');
@@ -716,39 +682,6 @@ const AuthAPI = {
           }
         });
       });
-      document.querySelectorAll('.auraEquipBtn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const feedback = document.getElementById('authShopFeedback');
-          feedback.style.color = '#ffd689';
-          feedback.textContent = 'Đang trang bị...';
-          try {
-            await this.equipAura(btn.dataset.key);
-            feedback.style.color = '#8affb0';
-            feedback.textContent = 'Đã trang bị!';
-            this.renderShop();
-          } catch (error) {
-            feedback.style.color = '#ff8a8a';
-            feedback.textContent = error.message;
-          }
-        });
-      });
-      const unequipBtn = document.querySelector('.auraUnequipBtn');
-      if (unequipBtn) {
-        unequipBtn.addEventListener('click', async () => {
-          const feedback = document.getElementById('authShopFeedback');
-          feedback.style.color = '#ffd689';
-          feedback.textContent = 'Đang tháo...';
-          try {
-            await this.equipAura('none');
-            feedback.style.color = '#8affb0';
-            feedback.textContent = 'Đã tháo aura.';
-            this.renderShop();
-          } catch (error) {
-            feedback.style.color = '#ff8a8a';
-            feedback.textContent = error.message;
-          }
-        });
-      }
     } catch (error) {
       this.contentArea.innerHTML = `<p>Error: ${error.message}</p>`;
     }

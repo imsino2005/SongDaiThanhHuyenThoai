@@ -56,15 +56,6 @@ class GameScene extends Phaser.Scene {
     this.playerShadow = this.add.image(this.player.x, this.player.y + 18, 'shadow_' + this.classId)
       .setDepth(9).setAlpha(0.45);
 
-    // Hào quang (Aura) đã trang bị từ Shop - đọc từ profile đã lưu (window.AuthAPI.user.equippedAura)
-    this.playerAura = null;
-    this.playerAuraPulse = 0;
-    const equippedAuraKey = window.AuthAPI && window.AuthAPI.user ? window.AuthAPI.user.equippedAura : null;
-    const auraDef = equippedAuraKey && typeof AURA_DEFS !== 'undefined' ? AURA_DEFS[equippedAuraKey] : null;
-    if (auraDef) {
-      this.playerAura = this.add.graphics().setDepth(8);
-      this.playerAuraColor = auraDef.color;
-    }
     // Run bob state
     this.playerBob = 0;
     this.isMoving = false;
@@ -76,11 +67,28 @@ class GameScene extends Phaser.Scene {
     const diffMul = { easy: 0.7, normal: 1, hard: 1.4 }[this.difficulty] || 1;
     this.diffMul = diffMul;
 
+    // Bonus vĩnh viễn từ Shop (Sức Mạnh/Sinh Lực/Nhanh Nhẹn) - đọc từ các cấp đã mua,
+    // lưu ở window.AuthAPI.user.upgrades (được refetch mỗi lần vào ClassSelectScene).
+    const ownedUpgrades = window.AuthAPI && window.AuthAPI.user ? window.AuthAPI.user.upgrades : null;
+    const upgradeMul = (statKey) => {
+      if (!ownedUpgrades || typeof UPGRADE_DEFS === 'undefined') return 1;
+      let mul = 1;
+      Object.keys(UPGRADE_DEFS).forEach(key => {
+        const def = UPGRADE_DEFS[key];
+        if (def.statKey === statKey) {
+          const level = ownedUpgrades[key] || 0;
+          mul += def.bonusPerLevel * level;
+        }
+      });
+      return mul;
+    };
+
+    const maxHp = Math.round(this.classData.baseStats.maxHp * upgradeMul('maxHp'));
     this.stats = {
-      maxHp: this.classData.baseStats.maxHp,
-      hp: this.classData.baseStats.maxHp,
-      speed: this.classData.baseStats.speed,
-      damage: this.classData.baseStats.damage,
+      maxHp,
+      hp: maxHp,
+      speed: Math.round(this.classData.baseStats.speed * upgradeMul('speed')),
+      damage: Math.round(this.classData.baseStats.damage * upgradeMul('damage')),
       attackSpeed: 1,
       armor: 0,
       pickupRange: 90,
@@ -492,16 +500,6 @@ class GameScene extends Phaser.Scene {
       this.playerShadow.setPosition(this.player.x, this.player.y + 18);
       this.playerShadow.setScale(this.isMoving ? 0.85 + Math.abs(Math.sin(this.playerBob)) * 0.1 : 1);
       this.playerShadow.setAlpha(this.isMoving ? 0.35 : 0.45);
-    }
-    if (this.playerAura) {
-      this.playerAuraPulse += delta * 0.003;
-      const pulse = 1 + Math.sin(this.playerAuraPulse) * 0.08;
-      const baseRadius = 30;
-      this.playerAura.clear();
-      this.playerAura.lineStyle(3, this.playerAuraColor, 0.55);
-      this.playerAura.strokeCircle(this.player.x, this.player.y + 6, baseRadius * pulse);
-      this.playerAura.fillStyle(this.playerAuraColor, 0.12);
-      this.playerAura.fillCircle(this.player.x, this.player.y + 6, baseRadius * pulse);
     }
   }
 

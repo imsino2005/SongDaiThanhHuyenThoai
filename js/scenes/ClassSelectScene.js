@@ -114,9 +114,9 @@ class ClassSelectScene extends Phaser.Scene {
         card.setScale(1);
       });
       card.on('pointerdown', () => {
-        if (this.startingGame) return; // tránh bấm nhiều lần khi đang chờ refetch aura
+        if (this.startingGame) return; // tránh bấm nhiều lần khi đang chờ refetch nâng cấp
         this.startingGame = true;
-        this.startGameWithFreshAura(id);
+        this.startGameWithFreshUpgrades(id);
       });
     });
 
@@ -128,18 +128,19 @@ class ClassSelectScene extends Phaser.Scene {
     backBtn.on('pointerdown', () => this.scene.start('TitleScene'));
   }
 
-  // Đảm bảo equippedAura mới nhất từ server trước khi vào game — tránh trường hợp
-  // người chơi bấm Play ngay sau khi đăng nhập, lúc window.AuthAPI.user.equippedAura
-  // chưa kịp được gắn từ lần fetch nền ở Menu/Shop, khiến aura đã trang bị không hiện ra.
-  async startGameWithFreshAura(classId) {
+  // Đảm bảo các cấp Nâng Cấp (Sức Mạnh/Sinh Lực/Nhanh Nhẹn) mới nhất từ server trước
+  // khi vào game — tránh trường hợp người chơi vừa mua nâng cấp ở Shop rồi bấm Play
+  // ngay, lúc window.AuthAPI.user.upgrades chưa kịp cập nhật từ lần fetch nền trước đó.
+  async startGameWithFreshUpgrades(classId) {
     if (window.AuthAPI && window.AuthAPI.token && window.AuthAPI.user && !window.AuthAPI.user.guest) {
       try {
-        const { profile } = await window.AuthAPI.getProfile();
-        const parsed = JSON.parse(profile.jsonProfile || '{}');
-        window.AuthAPI.user.equippedAura = parsed.equippedAura || null;
+        const { inventory } = await window.AuthAPI.getInventory();
+        const upgrades = {};
+        inventory.forEach(item => { upgrades[item.itemKey] = item.quantity; });
+        window.AuthAPI.user.upgrades = upgrades;
         localStorage.setItem('vs_user', JSON.stringify(window.AuthAPI.user));
       } catch (e) {
-        // Lỗi mạng/token — vẫn cho vào game với giá trị equippedAura đã có sẵn, không chặn người chơi.
+        // Lỗi mạng/token — vẫn cho vào game với các cấp nâng cấp đã có sẵn, không chặn người chơi.
       }
     }
     this.scene.start('GameScene', { classId, difficulty: this.selectedDiff });
