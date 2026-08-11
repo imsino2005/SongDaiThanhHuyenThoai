@@ -13,6 +13,8 @@ const GameAudio = {
   _nextNoteTime: 0,
   _step: 0,
   _unlocked: false,
+  bgAudio: null,
+  musicVolume: 0.18,
 
   init() {
     if (this.ctx) return;
@@ -44,6 +46,13 @@ const GameAudio = {
   setMuted(m) {
     this.muted = m;
     if (this.master) this.master.gain.setTargetAtTime(m ? 0 : 1, this.now(), 0.05);
+    if (this.bgAudio) {
+      this.bgAudio.volume = m ? 0 : this.musicVolume;
+      if (m) this.bgAudio.pause();
+      else if (this.musicPlaying) {
+        this.bgAudio.play().catch(() => {});
+      }
+    }
   },
 
   now() { return this.ctx ? this.ctx.currentTime : 0; },
@@ -164,78 +173,58 @@ const GameAudio = {
     lead: [0, 440, 0, 523.25, 440, 0, 349.23, 0, 0, 392, 0, 440, 349.23, 0, 293.66, 0]
   },
 
-  startMusic() {
-    if (!this.ctx || this.musicPlaying) return;
-    this.musicPlaying = true;
-    this._step = 0;
-    const stepTime = 60 / this._pattern.bpm / 2; // nốt 8
-    this._nextNoteTime = this.now() + 0.05;
-    const scheduleAheadTime = 0.2;
-
-    const scheduler = () => {
-      if (!this.musicPlaying || !this.ctx) return;
-      while (this._nextNoteTime < this.now() + scheduleAheadTime) {
-        this._scheduleMusicStep(this._step, this._nextNoteTime, stepTime);
-        this._step = (this._step + 1) % this._pattern.lead.length;
-        this._nextNoteTime += stepTime;
-      }
-      this._musicTimer = setTimeout(scheduler, 60);
-    };
-    scheduler();
+  // ---------- Background music ----------
+  // Nhạc nền dùng file MP3 do project cung cấp, phát lặp trong lúc chơi.
+  initBackgroundMusic() {
+    if (this.bgAudio) return this.bgAudio;
+    try {
+      this.bgAudio = new Audio('assets/audio/game-bg.mp3');
+      this.bgAudio.loop = true;
+      this.bgAudio.preload = 'auto';
+      this.bgAudio.volume = this.muted ? 0 : this.musicVolume;
+    } catch (e) {
+      this.bgAudio = null;
+    }
+    return this.bgAudio;
   },
 
-  _scheduleMusicStep(step, t, stepTime) {
-    // Bass: mỗi 2 bước đổi 1 nốt (giữ trường độ dài hơn cho ấm)
-    if (step % 2 === 0) {
-      const bassNote = this._pattern.bass[(step / 2) % this._pattern.bass.length];
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(bassNote, t);
-      osc.connect(gain); gain.connect(this.musicGain);
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(0.5, t + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + stepTime * 1.85);
-      osc.start(t); osc.stop(t + stepTime * 2);
-    }
-    // Lead melody
-    const leadNote = this._pattern.lead[step];
-    if (leadNote > 0) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = 'lowpass'; filter.frequency.value = 2200;
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(leadNote, t);
-      osc.connect(filter); filter.connect(gain); gain.connect(this.musicGain);
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(0.26, t + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + stepTime * 0.9);
-      osc.start(t); osc.stop(t + stepTime);
-    }
-    // Hi-hat nhẹ mỗi bước lẻ để giữ nhịp, không quá ồn
-    if (step % 2 === 1) {
-      const bufferSize = Math.max(1, Math.floor(this.ctx.sampleRate * 0.03));
-      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
-      const noise = this.ctx.createBufferSource();
-      noise.buffer = buffer;
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = 'highpass'; filter.frequency.value = 6000;
-      const gain = this.ctx.createGain();
-      noise.connect(filter); filter.connect(gain); gain.connect(this.musicGain);
-      gain.gain.setValueAtTime(0.05, t);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
-      noise.start(t); noise.stop(t + 0.04);
-    }
+  startMusic() {
+    this.initBackgroundMusic();
+    this.musicPlaying = true;
+    if (!this.bgAudio || this.muted) return;
+    this.bgAudio.volume = this.musicVolume;
+    this.bgAudio.currentTime = 0;
+    this.bgAudio.play().catch(() => {
+      // Browser có thể chặn autoplay; lần tương tác tiếp theo sẽ thử lại.
+      const resume = () => {
+        if (this.musicPlaying && !this.muted && this.bgAudio) {
+          this.bgAudio.play().catch(() => {});
+        }
+        window.removeEventListener('pointerdown', resume);
+        window.removeEventListener('keydown', resume);
+      };
+      window.addEventListener('pointerdown', resume, { once: true });
+      window.addEventListener('keydown', resume, { once: true });
+    });
+  },
+
+  pauseMusic() {
+    if (this.bgAudio) this.bgAudio.pause();
+  },
+
+  resumeMusic() {
+    if (!this.musicPlaying || this.muted || !this.bgAudio) return;
+    this.bgAudio.volume = this.musicVolume;
+    this.bgAudio.play().catch(() => {});
   },
 
   stopMusic() {
     this.musicPlaying = false;
-    if (this._musicTimer) clearTimeout(this._musicTimer);
-  }
-};
+    if (this.bgAudio) {
+      this.bgAudio.pause();
+      this.bgAudio.currentTime = 0;
+    }
+  }};
 
 // Áp trạng thái mute đã lưu (nếu có) ngay khi script load
 GameAudio.muted = localStorage.getItem('vs_muted') === '1';

@@ -1201,8 +1201,13 @@ class GameScene extends Phaser.Scene {
     const rangedCount = this.enemies.getChildren().filter(e => e.active && e.isRanged).length;
     let availablePool = pool;
     if (rangedCount >= 2) {
+      // Giữ NGUYÊN tổng số quái: chỉ thay slot ranged bằng quái thường/cận chiến.
       const nonRangedPool = pool.filter(key => !ENEMY_TYPES[key].ranged);
-      if (nonRangedPool.length) availablePool = nonRangedPool;
+      if (nonRangedPool.length) {
+        availablePool = nonRangedPool;
+      } else {
+        availablePool = ['grunt'];
+      }
     }
 
     const typeKey = Phaser.Utils.Array.GetRandom(availablePool);
@@ -2241,12 +2246,14 @@ class GameScene extends Phaser.Scene {
       this._confirmingExit = false;
       this.showPauseMenu();
       this.updatePauseButton();
+      if (typeof GameAudio !== 'undefined') GameAudio.pauseMusic();
       this.saveCloudGame();
     } else {
       this.physics.resume();
       this.setJoyZoneVisible(true);
       this.hidePauseMenu();
       this.updatePauseButton();
+      if (typeof GameAudio !== 'undefined') GameAudio.resumeMusic();
     }
   }
 
@@ -2558,6 +2565,7 @@ class GameScene extends Phaser.Scene {
     this.isGameOver = true;
     this.physics.pause();
     this.setJoyZoneVisible(false);
+    if (typeof GameAudio !== 'undefined') GameAudio.stopMusic();
     GameAudio.gameOver();
     const seconds = Math.floor(this.timeAlive / 1000);
     const old = parseInt(localStorage.getItem('vs_highscore') || '0');
