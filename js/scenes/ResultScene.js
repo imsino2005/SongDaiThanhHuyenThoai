@@ -52,7 +52,7 @@ class ResultScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     // Gửi điểm lên bảng xếp hạng cloud (chỉ khi đã đăng nhập thật, không áp dụng cho Guest)
-    const cloudStatus = this.add.text(width / 2, height * 0.68, '', {
+    const cloudStatus = this.add.text(width / 2, height * 0.70, '', {
       fontFamily: 'Segoe UI, Arial',
       fontSize: '15px',
       color: '#f7d774'
@@ -81,7 +81,7 @@ class ResultScene extends Phaser.Scene {
     // tài khoản đã đăng nhập thật — giống logic lưu điểm ở trên). Server tự bỏ
     // qua nếu thành tựu đã mở khóa từ trước (findOrCreate), nên chỉ những cái
     // thật sự MỚI (không có field "message" trong response) mới được hiển thị.
-    const achievementText = this.add.text(width / 2, height * 0.73, '', {
+    const achievementText = this.add.text(width / 2, height * 0.75, '', {
       fontFamily: 'Segoe UI, Arial',
       fontSize: '14px',
       fontStyle: 'bold',
@@ -117,7 +117,7 @@ class ResultScene extends Phaser.Scene {
     }
 
     // Buttons
-    const retryBtn = this.add.text(width / 2, height * 0.79, '▶  PLAY AGAIN', {
+    const retryBtn = this.add.text(width / 2, height * 0.82, '▶  PLAY AGAIN', {
       fontFamily: 'Segoe UI, Arial',
       fontSize: '28px',
       fontStyle: 'bold',
@@ -128,14 +128,18 @@ class ResultScene extends Phaser.Scene {
 
     retryBtn.on('pointerover', () => retryBtn.setStyle({ backgroundColor: '#8b7cf7' }));
     retryBtn.on('pointerout', () => retryBtn.setStyle({ backgroundColor: '#6c5ce7' }));
-    retryBtn.on('pointerdown', () => this.scene.start('ClassSelectScene'));
+    retryBtn.on('pointerdown', async () => {
+      this.scene.start('ClassSelectScene');
+    });
 
-    const menuBtn = this.add.text(width / 2, height * 0.9, 'Back to Title', {
+    const menuBtn = this.add.text(width / 2, height * 0.92, 'Back to Title', {
       fontFamily: 'Segoe UI, Arial',
       fontSize: '18px',
       color: '#aaaacc'
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
 
-    menuBtn.on('pointerdown', () => this.scene.start('TitleScene'));
+    menuBtn.on('pointerdown', async () => {
+      this.scene.start('TitleScene');
+    });
   }
 }

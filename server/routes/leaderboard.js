@@ -33,7 +33,7 @@ router.get('/', async (req, res, next) => {
 
     const top = Array.from(bestByUser.values())
       .sort((a, b) => b.score - a.score)
-      .slice(0, 20);
+      .slice(0, 5);
 
     res.json({
       leaderboard: top.map(entry => ({

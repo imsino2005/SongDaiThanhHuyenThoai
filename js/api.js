@@ -197,6 +197,24 @@ const AuthAPI = {
         box-shadow: 0 0 48px rgba(0, 0, 0, 0.45);
         color: #eef1ff;
       }
+      #authModalContent.leaderboardModal {
+        width: min(760px, 94vw);
+        max-height: 88vh;
+      }
+      #authModalContent.leaderboardModal #authModalBody {
+        max-height: calc(88vh - 88px);
+        overflow-y: auto;
+        overflow-x: auto;
+        padding-right: 4px;
+      }
+      .leaderboardWrap {
+        width: 100%;
+        overflow-x: auto;
+      }
+      .leaderboardWrap .authTable {
+        min-width: 640px;
+      }
+
       #authModalHeader {
         display: flex;
         justify-content: space-between;
@@ -277,6 +295,8 @@ const AuthAPI = {
         border-radius: 16px;
         min-height: 56px;
       }
+      .authMenuButton.menuPrimary { background: linear-gradient(135deg, #6e6dff, #4d4eee); }
+      .authMenuButton.menuInventory { background: linear-gradient(135deg, #4f8060, #31583f); }
       .authTable {
         width: 100%;
         border-collapse: collapse;
@@ -314,6 +334,8 @@ const AuthAPI = {
 
   renderContent(section) {
     if (!this.contentArea) return;
+    const modalContent = this.modal.querySelector('#authModalContent');
+    if (modalContent) modalContent.classList.toggle('leaderboardModal', section === 'leaderboard');
     this.contentArea.innerHTML = '';
     switch (section) {
       case 'login':
@@ -480,12 +502,12 @@ const AuthAPI = {
     this.contentArea.innerHTML = `
       <p style="margin-bottom:16px; color:#c8d0ff; font-size:15px;">${userLabel}${goldLabel}</p>
       <div class="authMenuGrid">
-        <button class="authMenuButton" id="menuPlayBtn">Play</button>
-        <button class="authMenuButton" id="menuProfileBtn">Profile</button>
-        <button class="authMenuButton" id="menuLeaderboardBtn">Leaderboard</button>
-        <button class="authMenuButton" id="menuShopBtn">Kho Đồ</button>
-        <button class="authMenuButton" id="menuAchievementsBtn">Achievements</button>
-        <button class="authMenuButton" id="menuLogoutBtn">Logout</button>
+        <button class="authMenuButton menuPrimary" id="menuPlayBtn">▶ Play</button>
+        <button class="authMenuButton menuInventory" id="menuShopBtn">⬆️ Nâng Cấp</button>
+        <button class="authMenuButton" id="menuProfileBtn">👤 Profile</button>
+        <button class="authMenuButton" id="menuLeaderboardBtn">🏆 Leaderboard</button>
+        <button class="authMenuButton" id="menuAchievementsBtn">🏅 Achievements</button>
+        <button class="authMenuButton" id="menuLogoutBtn">↪ Logout</button>
       </div>
     `;
     document.getElementById('menuPlayBtn').addEventListener('click', () => {
@@ -557,15 +579,48 @@ const AuthAPI = {
       });
       document.getElementById('authLoadSaveBtn').addEventListener('click', async () => {
         const feedback = document.getElementById('authProfileFeedback');
-        feedback.textContent = 'Loading save...';
+        feedback.textContent = 'Đang tải Cloud Save...';
         try {
           const result = await this.loadCloud();
-          if (result.cloudSave && window.currentGameScene && window.currentGameScene.applySaveData) {
-            window.currentGameScene.applySaveData(result.cloudSave);
-            feedback.textContent = 'Cloud save loaded into current game.';
-          } else {
-            feedback.textContent = 'No active game to load save.';
+          if (!result.cloudSave) {
+            feedback.textContent = 'Không tìm thấy Cloud Save.';
+            return;
           }
+
+          const save = result.cloudSave;
+          const scene = window.game ? window.game.scene.getScene('GameScene') : null;
+
+          // Nếu đang ở GameScene: nạp snapshot trực tiếp.
+          if (scene && scene.scene.isActive() && scene.applySaveData) {
+            const wasPaused = !!scene.isPaused;
+            if (wasPaused) scene.hidePauseMenu?.();
+            const ok = scene.applySaveData(save);
+            if (!ok && wasPaused) {
+              scene.isPaused = true;
+              scene.physics.pause();
+              scene.setJoyZoneVisible(false);
+              scene.showPauseMenu();
+            }
+            feedback.textContent = ok ? 'Đã load Cloud Save vào game.' : 'Cloud Save không phù hợp với class hiện tại.';
+            return;
+          }
+
+          // Nếu đang ở Title/Menu: mở một GameScene mới theo class của save rồi
+          // truyền snapshot vào init(). Người chơi không cần chọn lại class.
+          if (!window.game || !window.game.scene) {
+            throw new Error('Game chưa sẵn sàng để load Cloud Save.');
+          }
+          const classId = save.classId || 'archer';
+          if (typeof CLASSES === 'undefined' || !CLASSES[classId]) {
+            throw new Error('Class trong Cloud Save không còn tồn tại.');
+          }
+
+          this.modal.style.display = 'none';
+          window.game.scene.start('GameScene', {
+            classId,
+            difficulty: save.difficulty || 'normal',
+            cloudSave: save
+          });
         } catch (error) {
           feedback.textContent = error.message;
         }
@@ -577,6 +632,7 @@ const AuthAPI = {
 
   async renderLeaderboard() {
     this.modal.querySelector('#authModalTitle').textContent = 'Leaderboard';
+    this.modal.querySelector('#authModalContent').classList.add('leaderboardModal');
     this.contentArea.innerHTML = '<p>Loading leaderboard...</p>';
     try {
       const { leaderboard } = await this.getLeaderboard();
@@ -600,10 +656,12 @@ const AuthAPI = {
       }).join('');
       this.contentArea.innerHTML = `
         <p style="color:#a0a0c0; font-size:13px; margin-bottom:10px;">Hiển thị điểm cao nhất của mỗi người chơi.</p>
-        <table class="authTable">
-          <thead><tr><th>#</th><th>User</th><th>Score</th><th>Kills</th><th>Level</th><th>Mode</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
+        <div class="leaderboardWrap">
+          <table class="authTable">
+            <thead><tr><th>#</th><th>User</th><th>Score</th><th>Kills</th><th>Level</th><th>Mode</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
       `;
     } catch (error) {
       this.contentArea.innerHTML = `<p>Error: ${error.message}</p>`;
@@ -611,7 +669,7 @@ const AuthAPI = {
   },
 
   async renderShop() {
-    this.modal.querySelector('#authModalTitle').textContent = 'Kho Đồ - Nâng Cấp';
+    this.modal.querySelector('#authModalTitle').textContent = 'Nâng Cấp';
     this.contentArea.innerHTML = '<p>Loading shop...</p>';
     try {
       const catalogData = await this.getCatalog();

@@ -7,6 +7,8 @@ class GameScene extends Phaser.Scene {
     this.classId = data.classId || 'archer';
     this.classData = CLASSES[this.classId];
     this.difficulty = data.difficulty || 'normal';
+    // Cloud Save được truyền vào khi người chơi chọn Load Cloud Save từ menu.
+    this.pendingCloudSave = data.cloudSave || null;
   }
 
   create() {
@@ -22,14 +24,27 @@ class GameScene extends Phaser.Scene {
         this.add.image(x + tileSize / 2, y + tileSize / 2, key).setDepth(0).setAlpha(0.95);
       }
     }
-    // Decorative props
+    // Deterministic decoration layout for the single-player map.
+    const mapSeedSource = 'offline-map';
+    let mapSeed = 2166136261;
+    for (let i = 0; i < mapSeedSource.length; i++) {
+      mapSeed ^= mapSeedSource.charCodeAt(i);
+      mapSeed = Math.imul(mapSeed, 16777619);
+    }
+    const seededRandom = () => {
+      mapSeed += 0x6D2B79F5;
+      let t = mapSeed;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
     for (let i = 0; i < 80; i++) {
-      const dx = Phaser.Math.Between(40, this.worldSize - 40);
-      const dy = Phaser.Math.Between(40, this.worldSize - 40);
-      if (Math.random() < 0.6) {
-        this.add.image(dx, dy, 'deco_grass').setDepth(1).setAlpha(0.7).setScale(Phaser.Math.FloatBetween(0.8, 1.4));
+      const dx = 40 + Math.floor(seededRandom() * (this.worldSize - 80));
+      const dy = 40 + Math.floor(seededRandom() * (this.worldSize - 80));
+      if (seededRandom() < 0.6) {
+        this.add.image(dx, dy, 'deco_grass').setDepth(1).setAlpha(0.7).setScale(0.8 + seededRandom() * 0.6);
       } else {
-        this.add.image(dx, dy, 'deco_rune').setDepth(1).setAlpha(0.35).setScale(Phaser.Math.FloatBetween(0.7, 1.2));
+        this.add.image(dx, dy, 'deco_rune').setDepth(1).setAlpha(0.35).setScale(0.7 + seededRandom() * 0.5);
       }
     }
 
@@ -191,9 +206,11 @@ class GameScene extends Phaser.Scene {
     if (!GameAudio.musicPlaying) GameAudio.startMusic();
 
     this.createUI();
+    this.createPauseButton();
     this.updateSkillPanel();
 
     window.currentGameScene = this;
+
 
     // Player subtle glow (class color)
     try {
@@ -203,6 +220,19 @@ class GameScene extends Phaser.Scene {
     } catch (e) {}
 
     this.setJoyZoneVisible(true);
+
+    // Nếu scene được mở từ Load Cloud Save, áp dụng dữ liệu sau khi toàn bộ
+    // player/UI/physics đã được khởi tạo. Không cộng dồn với save cũ.
+    if (this.pendingCloudSave) {
+      const saveData = this.pendingCloudSave;
+      this.pendingCloudSave = null;
+      this.time.delayedCall(0, () => {
+        if (this.applySaveData(saveData)) {
+          this.updateUI();
+          this.updateSkillPanel();
+        }
+      });
+    }
 
     if (this.pendingStartDrone) {
       this.time.delayedCall(300, () => {
@@ -387,7 +417,7 @@ class GameScene extends Phaser.Scene {
       g.fillCircle(x0 + e.x * scale, y0 + e.y * scale, 2);
     });
 
-    // Player
+    // Local player
     g.fillStyle(0x44ff88, 1);
     g.fillCircle(x0 + this.player.x * scale, y0 + this.player.y * scale, 3.5);
 
@@ -1165,7 +1195,17 @@ class GameScene extends Phaser.Scene {
 
   spawnOneEnemy(difficulty) {
     const pool = getEnemyPoolForTime(Math.floor(this.timeAlive / 1000));
-    const typeKey = Phaser.Utils.Array.GetRandom(pool);
+
+    // Giới hạn quái bắn xa để màn chơi đỡ bị dồn đạn.
+    // Tối đa 2 ranged enemy cùng lúc; nếu đủ thì chỉ chọn quái cận chiến.
+    const rangedCount = this.enemies.getChildren().filter(e => e.active && e.isRanged).length;
+    let availablePool = pool;
+    if (rangedCount >= 2) {
+      const nonRangedPool = pool.filter(key => !ENEMY_TYPES[key].ranged);
+      if (nonRangedPool.length) availablePool = nonRangedPool;
+    }
+
+    const typeKey = Phaser.Utils.Array.GetRandom(availablePool);
     this.spawnEnemyOfType(typeKey, difficulty);
   }
 
@@ -2128,6 +2168,69 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  // ===== PAUSE UI =====
+  // Dùng font hệ thống có đầy đủ ký tự tiếng Việt; tránh emoji vì Phaser Canvas
+  // có thể fallback sang font khác gây lệch/đè chữ trên một số máy.
+  createPauseButton() {
+    if (this.pauseButton) this.pauseButton.destroy();
+    const cam = this.cameras.main;
+    const x = cam.width - 18;
+    const y = 16;
+
+    const bg = this.add.rectangle(x - 55, y + 22, 112, 40, 0x161b2d, 0.94)
+      .setStrokeStyle(1.5, 0x6574a6, 0.9)
+      .setScrollFactor(0)
+      .setDepth(250)
+      .setInteractive({ useHandCursor: true });
+
+    const label = this.add.text(x - 55, y + 22, 'PAUSE', {
+      fontFamily: 'Arial, Tahoma, sans-serif',
+      fontSize: '14px',
+      fontStyle: 'bold',
+      color: '#ffffff'
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(251);
+
+    const icon = this.add.text(x - 88, y + 22, '||', {
+      fontFamily: 'Arial, Tahoma, sans-serif',
+      fontSize: '15px',
+      fontStyle: 'bold',
+      color: '#9fb7ff'
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(251);
+
+    this.pauseButton = this.add.container(0, 0, [bg, label, icon])
+      .setDepth(250)
+      .setScrollFactor(0);
+    this.pauseButton._bg = bg;
+    this.pauseButton._label = label;
+    this.pauseButton._icon = icon;
+
+    bg.on('pointerover', () => {
+      if (!this.isPaused) bg.setFillStyle(0x26345a, 1);
+    });
+    bg.on('pointerout', () => {
+      bg.setFillStyle(this.isPaused ? 0x28543b : 0x161b2d, this.isPaused ? 1 : 0.94);
+    });
+    bg.on('pointerdown', () => this.togglePause());
+  }
+
+  updatePauseButton() {
+    if (!this.pauseButton) return;
+    const bg = this.pauseButton._bg;
+    const label = this.pauseButton._label;
+    const icon = this.pauseButton._icon;
+    if (this.isPaused) {
+      label.setText('TIẾP TỤC');
+      icon.setText('>');
+      bg.setSize(138, 40);
+      bg.setFillStyle(0x28543b, 1);
+    } else {
+      label.setText('PAUSE');
+      icon.setText('||');
+      bg.setSize(112, 40);
+      bg.setFillStyle(0x161b2d, 0.94);
+    }
+  }
+
   togglePause() {
     if (this.isGameOver || this.isLevelingUp || this.isRollingChest) return;
     this.isPaused = !this.isPaused;
@@ -2137,48 +2240,73 @@ class GameScene extends Phaser.Scene {
       this._confirmingReset = false;
       this._confirmingExit = false;
       this.showPauseMenu();
+      this.updatePauseButton();
+      this.saveCloudGame();
     } else {
       this.physics.resume();
       this.setJoyZoneVisible(true);
       this.hidePauseMenu();
+      this.updatePauseButton();
     }
   }
 
-  // ========== MENU TẠM DỪNG (ESC / P) ==========
+  async saveCloudGame() {
+    const api = window.AuthAPI;
+    if (!api || !api.token || !api.user || api.user.guest) {
+      this.setPauseSaveStatus('Đăng nhập để sử dụng Cloud Save', false);
+      return false;
+    }
+
+    try {
+      this.setPauseSaveStatus('Đang lưu Cloud Save...', false);
+      const result = await api.saveCloud(this.exportSaveData());
+      this.setPauseSaveStatus('Cloud Save đã lưu thành công', true);
+      return !!(result && result.saved);
+    } catch (error) {
+      console.error('Auto Cloud Save failed:', error);
+      this.setPauseSaveStatus('Lưu Cloud thất bại: ' + (error.message || 'Lỗi kết nối'), false);
+      return false;
+    }
+  }
+
+  // ========== MENU TẠM DỪNG ==========
   showPauseMenu() {
-    // Dùng toạ độ theo camera (world-space), giống UI level-up/chest-roll đã hoạt động ổn định,
-    // tránh lỗi hit-area bị lệch khi mix scrollFactor(0) bên trong Container.
     const cam = this.cameras.main;
     const w = cam.width;
     const h = cam.height;
     const topY = cam.scrollY;
     const cx = cam.scrollX + w / 2;
+    const font = 'Arial, Tahoma, sans-serif';
 
+    if (this.pauseContainer) this.pauseContainer.destroy();
     this.pauseContainer = this.add.container(0, 0).setDepth(300);
 
-    const overlay = this.add.rectangle(cx, topY + h / 2, w, h, 0x000000, 0.82);
-    this.pauseContainer.add(overlay);
+    // Nền tối + thẻ trung tâm
+    const overlay = this.add.rectangle(cx, topY + h / 2, w, h, 0x05070d, 0.86);
+    const cardH = Math.min(560, h - 28);
+    const card = this.add.rectangle(cx, topY + h / 2, Math.min(760, w - 32), cardH, 0x111827, 0.98)
+      .setStrokeStyle(2, 0x4b5f91, 0.9);
+    this.pauseContainer.add([overlay, card]);
 
-    const title = this.add.text(cx, topY + 46, 'TẠM DỪNG', {
-      fontSize: '28px', color: '#ffffff', fontStyle: 'bold', fontFamily: 'Segoe UI'
+    const title = this.add.text(cx, topY + 42, 'TẠM DỪNG', {
+      fontSize: '30px', color: '#ffffff', fontStyle: 'bold', fontFamily: font
     }).setOrigin(0.5);
     this.pauseContainer.add(title);
 
     const subInfo = this.add.text(cx, topY + 76,
-      `${this.classData.name}  •  Lv ${this.level}  •  Kills ${this.kills}  •  ${Math.floor(this.timeAlive / 60000)}:${Math.floor((this.timeAlive / 1000) % 60).toString().padStart(2, '0')}`,
-      { fontSize: '13px', color: '#99aacc', fontFamily: 'Segoe UI' }
+      `${this.classData.name}  |  Lv ${this.level}  |  Kills ${this.kills}  |  ${Math.floor(this.timeAlive / 60000)}:${Math.floor((this.timeAlive / 1000) % 60).toString().padStart(2, '0')}`,
+      { fontSize: '13px', color: '#aebbd4', fontFamily: font }
     ).setOrigin(0.5);
     this.pauseContainer.add(subInfo);
 
-    // ---- Danh sách kỹ năng đang có (weapon + passive) ----
-    const listLabel = this.add.text(cx, topY + 108, 'Kỹ năng hiện có:', {
-      fontSize: '14px', color: '#ffdd88', fontStyle: 'bold', fontFamily: 'Segoe UI'
+    const listLabel = this.add.text(cx, topY + 110, 'KỸ NĂNG HIỆN CÓ', {
+      fontSize: '14px', color: '#ffd978', fontStyle: 'bold', fontFamily: font
     }).setOrigin(0.5);
     this.pauseContainer.add(listLabel);
 
     const iconSize = 40;
     const cellW = 84;
-    const cols = Math.max(3, Math.min(7, Math.floor((w - 40) / cellW)));
+    const cols = Math.max(3, Math.min(7, Math.floor((w - 60) / cellW)));
     const weaponIds = Object.keys(this.weaponLevels);
     const skillEntries = weaponIds.map(id => ({
       kind: 'weapon', id, key: 'icon_' + id,
@@ -2188,65 +2316,100 @@ class GameScene extends Phaser.Scene {
       name: getPassiveName(id), sub: 'Passive'
     })));
 
-    const gridTop = topY + 132;
+    const gridTop = topY + 136;
     const gridW = cols * cellW;
     const gridX0 = cx - gridW / 2 + cellW / 2;
 
     if (skillEntries.length === 0) {
-      const hint = this.add.text(cx, gridTop + 10, 'Chưa có kỹ năng nào', {
-        fontSize: '12px', color: '#8a9ab0', fontFamily: 'Segoe UI'
+      const hint = this.add.text(cx, gridTop + 12, 'Chưa có kỹ năng nào', {
+        fontSize: '12px', color: '#8d9bb5', fontFamily: font
       }).setOrigin(0.5);
       this.pauseContainer.add(hint);
     } else {
-      skillEntries.forEach((s, i) => {
+      skillEntries.slice(0, cols * 2).forEach((s, i) => {
         const col = i % cols;
         const row = Math.floor(i / cols);
         const x = gridX0 + col * cellW;
         const y = gridTop + row * 66;
 
-        const bg = this.add.rectangle(x, y, iconSize + 8, iconSize + 8, 0x1a1a2e)
-          .setStrokeStyle(1, s.kind === 'passive' ? 0x44aa66 : 0x555577);
+        const bg = this.add.rectangle(x, y, iconSize + 10, iconSize + 10, 0x1a2338)
+          .setStrokeStyle(1, s.kind === 'passive' ? 0x4caf73 : 0x53668f);
         this.pauseContainer.add(bg);
 
         const icon = this.textures.exists(s.key)
           ? this.add.image(x, y, s.key).setDisplaySize(iconSize, iconSize)
-          : this.add.rectangle(x, y, iconSize, iconSize, 0x333355);
+          : this.add.rectangle(x, y, iconSize, iconSize, 0x303b58);
         this.pauseContainer.add(icon);
 
-        const nameT = this.add.text(x, y + iconSize / 2 + 8, s.name, {
-          fontSize: '9px', color: '#d7d7ff', fontFamily: 'Segoe UI', align: 'center', wordWrap: { width: cellW - 4 }
+        const nameT = this.add.text(x, y + iconSize / 2 + 7, s.name, {
+          fontSize: '9px', color: '#dce4f7', fontFamily: font, align: 'center',
+          wordWrap: { width: cellW - 4 }
         }).setOrigin(0.5, 0);
         this.pauseContainer.add(nameT);
 
-        const subT = this.add.text(x, y + iconSize / 2 + 22, s.sub, {
-          fontSize: '9px', color: s.kind === 'passive' ? '#a4ff9c' : '#88ccff', fontFamily: 'Segoe UI'
+        const subT = this.add.text(x, y + iconSize / 2 + 21, s.sub, {
+          fontSize: '9px', color: s.kind === 'passive' ? '#9df0ad' : '#8fc9ff', fontFamily: font
         }).setOrigin(0.5, 0);
         this.pauseContainer.add(subT);
       });
     }
 
-    const rows = Math.max(1, Math.ceil(skillEntries.length / cols));
-    const listBottom = gridTop + rows * 66 + 10;
+    const rows = Math.max(1, Math.ceil(Math.min(skillEntries.length, cols * 2) / cols));
+    const listBottom = gridTop + rows * 66 + 8;
 
-    // ---- Nút: Tiếp tục / Chơi lại / Thoát ----
-    const btnY = Math.min(topY + h - 50, listBottom + 40);
-    const makeBtn = (x, label, bg, hoverBg, onClick) => {
-      const btn = this.add.rectangle(x, btnY, 150, 46, bg)
-        .setStrokeStyle(2, 0xffffff, 0.25)
+    // Trạng thái save nằm riêng, không đè lên nút.
+    const statusY = Math.min(topY + h - 128, listBottom + 14);
+    this.pauseSaveStatus = this.add.text(cx, statusY, '', {
+      fontSize: '12px', color: '#c7d2e8', fontFamily: font, align: 'center'
+    }).setOrigin(0.5);
+    this.pauseContainer.add(this.pauseSaveStatus);
+
+    const btnY = Math.min(topY + h - 86, Math.max(listBottom + 52, statusY + 34));
+    const makeBtn = (x, label, bgColor, hoverColor, onClick) => {
+      const btn = this.add.rectangle(x, btnY, 150, 46, bgColor, 1)
+        .setStrokeStyle(2, 0xffffff, 0.18)
         .setInteractive({ useHandCursor: true });
       const txt = this.add.text(x, btnY, label, {
-        fontSize: '15px', color: '#ffffff', fontStyle: 'bold', fontFamily: 'Segoe UI'
+        fontSize: '15px', color: '#ffffff', fontStyle: 'bold', fontFamily: font
       }).setOrigin(0.5);
-      btn.on('pointerover', () => btn.setFillStyle(hoverBg));
-      btn.on('pointerout', () => btn.setFillStyle(bg));
+      btn.on('pointerover', () => btn.setFillStyle(hoverColor, 1));
+      btn.on('pointerout', () => btn.setFillStyle(bgColor, 1));
       btn.on('pointerdown', onClick);
       this.pauseContainer.add([btn, txt]);
       return btn;
     };
 
-    makeBtn(cx - 170, 'TIẾP TỤC', 0x2a5a3a, 0x36774a, () => this.togglePause());
-    makeBtn(cx, 'CHƠI LẠI', 0x5a4a1a, 0x77641f, () => this.confirmResetGame());
-    makeBtn(cx + 170, 'THOÁT', 0x5a1a1a, 0x772222, () => this.confirmExitGame());
+    makeBtn(cx - 170, 'TIẾP TỤC', 0x28613d, 0x347a4d, () => this.togglePause());
+    makeBtn(cx, 'CHƠI LẠI', 0x67551b, 0x80691f, () => this.confirmResetGame());
+    makeBtn(cx + 170, 'THOÁT', 0x6a2828, 0x833535, () => this.confirmExitGame());
+
+    // Nút Cloud Save riêng, không dùng emoji để tránh lỗi font.
+    const saveBg = this.add.rectangle(cx, btnY + 58, 190, 32, 0x1d3557, 1)
+      .setStrokeStyle(1, 0x6c9ee8, 0.7)
+      .setInteractive({ useHandCursor: true });
+    const saveTxt = this.add.text(cx, btnY + 58, 'LƯU CLOUD NGAY', {
+      fontSize: '12px', color: '#d9e9ff', fontStyle: 'bold', fontFamily: font
+    }).setOrigin(0.5);
+    saveBg.on('pointerover', () => saveBg.setFillStyle(0x294b78, 1));
+    saveBg.on('pointerout', () => saveBg.setFillStyle(0x1d3557, 1));
+    saveBg.on('pointerdown', () => this.saveCloudGame());
+    this.pauseContainer.add([saveBg, saveTxt]);
+
+    const continueNote = this.add.text(cx, btnY + 88,
+      'Game đã tự động lưu. Vào PROFILE để tải Cloud Save.', {
+      fontFamily: font,
+      fontSize: '11px',
+      color: '#8f9db8',
+      align: 'center',
+      wordWrap: { width: Math.min(520, w - 40) }
+    }).setOrigin(0.5);
+    this.pauseContainer.add(continueNote);
+  }
+
+  setPauseSaveStatus(text, success) {
+    if (!this.pauseSaveStatus || !this.pauseContainer) return;
+    this.pauseSaveStatus.setText(text);
+    this.pauseSaveStatus.setColor(success ? '#8dffb0' : '#ffd08a');
   }
 
   hidePauseMenu() {
@@ -2254,6 +2417,7 @@ class GameScene extends Phaser.Scene {
       this.pauseContainer.destroy();
       this.pauseContainer = null;
     }
+    this.pauseSaveStatus = null;
   }
 
   // Bấm 1 lần sẽ đổi nút thành "Xác nhận?" để tránh out/reset nhầm, bấm lần 2 mới thực thi.
@@ -2296,13 +2460,25 @@ class GameScene extends Phaser.Scene {
 
   exportSaveData() {
     return {
+      version: 2,
       classId: this.classId,
       difficulty: this.difficulty,
       timeAlive: this.timeAlive,
+      difficultyTimer: this.difficultyTimer,
+      enemySpawnTimer: this.enemySpawnTimer,
+      lastBossAt: this.lastBossAt || 0,
       kills: this.kills,
+      bossKills: this.bossKills,
+      chestsOpened: this.chestsOpened,
       level: this.level,
       xp: this.xp,
       xpToNext: this.xpToNext,
+      killStreak: this.killStreak,
+      killStreakTimer: this.killStreakTimer,
+      player: {
+        x: this.player ? this.player.x : 0,
+        y: this.player ? this.player.y : 0
+      },
       stats: {
         maxHp: this.stats.maxHp,
         hp: this.stats.hp,
@@ -2316,8 +2492,9 @@ class GameScene extends Phaser.Scene {
         area: this.stats.area,
         lifesteal: this.stats.lifesteal
       },
-      weaponLevels: this.weaponLevels,
-      ownedPassives: this.ownedPassives,
+      // Clone để snapshot không bị thay đổi sau khi gửi request.
+      weaponLevels: { ...this.weaponLevels },
+      ownedPassives: [...this.ownedPassives],
       createdAt: new Date().toISOString()
     };
   }
@@ -2325,19 +2502,55 @@ class GameScene extends Phaser.Scene {
   applySaveData(saveData) {
     if (!saveData || typeof saveData !== 'object') return false;
     if (saveData.classId && saveData.classId !== this.classId) return false;
+
     if (saveData.difficulty) this.difficulty = saveData.difficulty;
-    if (typeof saveData.level === 'number') this.level = saveData.level;
-    if (typeof saveData.xp === 'number') this.xp = saveData.xp;
-    if (typeof saveData.xpToNext === 'number') this.xpToNext = saveData.xpToNext;
-    if (saveData.stats) {
+    if (typeof saveData.timeAlive === 'number') this.timeAlive = Math.max(0, saveData.timeAlive);
+    if (typeof saveData.difficultyTimer === 'number') this.difficultyTimer = Math.max(0, saveData.difficultyTimer);
+    if (typeof saveData.enemySpawnTimer === 'number') this.enemySpawnTimer = Math.max(0, saveData.enemySpawnTimer);
+    if (typeof saveData.lastBossAt === 'number') this.lastBossAt = Math.max(0, saveData.lastBossAt);
+    if (typeof saveData.kills === 'number') this.kills = Math.max(0, saveData.kills);
+    if (typeof saveData.bossKills === 'number') this.bossKills = Math.max(0, saveData.bossKills);
+    if (typeof saveData.chestsOpened === 'number') this.chestsOpened = Math.max(0, saveData.chestsOpened);
+    if (typeof saveData.level === 'number') this.level = Math.max(1, saveData.level);
+    if (typeof saveData.xp === 'number') this.xp = Math.max(0, saveData.xp);
+    if (typeof saveData.xpToNext === 'number') this.xpToNext = Math.max(1, saveData.xpToNext);
+    if (typeof saveData.killStreak === 'number') this.killStreak = Math.max(0, saveData.killStreak);
+    if (typeof saveData.killStreakTimer === 'number') this.killStreakTimer = Math.max(0, saveData.killStreakTimer);
+
+    if (saveData.stats && typeof saveData.stats === 'object') {
       this.stats = { ...this.stats, ...saveData.stats };
-      if (this.stats.hp > this.stats.maxHp) this.stats.hp = this.stats.maxHp;
+      this.stats.maxHp = Math.max(1, Number(this.stats.maxHp) || 1);
+      this.stats.hp = Phaser.Math.Clamp(Number(this.stats.hp) || 0, 0, this.stats.maxHp);
     }
-    if (saveData.weaponLevels) this.weaponLevels = { ...this.weaponLevels, ...saveData.weaponLevels };
+
+    // Save là snapshot hoàn chỉnh: thay thế, KHÔNG merge với trạng thái hiện tại.
+    if (saveData.weaponLevels && typeof saveData.weaponLevels === 'object') {
+      this.weaponLevels = { ...saveData.weaponLevels };
+    }
     if (Array.isArray(saveData.ownedPassives)) {
-      this.ownedPassives = Array.from(new Set([...this.ownedPassives, ...saveData.ownedPassives]));
+      this.ownedPassives = [...new Set(saveData.ownedPassives)];
     }
+
+    this.weaponCooldowns = {};
+    Object.keys(this.weaponLevels).forEach(id => { this.weaponCooldowns[id] = 0; });
+
+    if (saveData.player && this.player) {
+      const x = Number(saveData.player.x);
+      const y = Number(saveData.player.y);
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        this.player.setPosition(Phaser.Math.Clamp(x, 0, this.worldSize), Phaser.Math.Clamp(y, 0, this.worldSize));
+        this.player.setVelocity(0, 0);
+      }
+    }
+
+    this.isGameOver = false;
+    this.isLevelingUp = false;
+    this.isRollingChest = false;
+    this.isPaused = false;
+    this.physics.resume();
+    this.setJoyZoneVisible(true);
     this.updateSkillPanel();
+    this.updateUI();
     return true;
   }
 
@@ -2362,7 +2575,7 @@ class GameScene extends Phaser.Scene {
     localStorage.setItem('vs_classes_played', JSON.stringify(playedClasses));
     const allClassesPlayed = Object.keys(CLASSES).every(id => playedClasses.includes(id));
 
-    this.scene.start('ResultScene', {
+    const resultData = {
       timeAlive: seconds,
       kills: this.kills,
       level: this.level,
@@ -2371,6 +2584,19 @@ class GameScene extends Phaser.Scene {
       chestsOpened: this.chestsOpened,
       difficulty: this.difficulty,
       allClassesPlayed
-    });
+    };
+
+    this.scene.start('ResultScene', resultData);
+  }
+  shutdown() {
+    if (this.pauseButton) {
+      this.pauseButton.destroy();
+      this.pauseButton = null;
+    }
+    if (this.pauseContainer) {
+      this.pauseContainer.destroy();
+      this.pauseContainer = null;
+    }
+    window.currentGameScene = null;
   }
 }

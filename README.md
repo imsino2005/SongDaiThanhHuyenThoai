@@ -1,6 +1,6 @@
 # Survivors - Vampire Survivors Style Game
 
-Game web dùng Phaser 3, single-player, 4 class, hệ thống Weapon + Passive + Evolution.
+Game web dùng Phaser 3, 4 class, hệ thống Weapon + Passive + Evolution, chế độ chơi đơn và Cloud Save.
 
 ## Cách chạy
 
@@ -35,7 +35,7 @@ Game web dùng Phaser 3, single-player, 4 class, hệ thống Weapon + Passive +
 - **Đa dạng hoá quái thường**: 5 loại — Grunt (thường), Bat (nhanh, máu mỏng), Ogre (trâu bò, chậm), Cultist (đứng bắn xa), Rat (rất yếu nhưng đông), xuất hiện dần theo thời gian sống sót.
 - **Đa dạng hoá boss**: 3 boss riêng biệt xoay vòng — Blood Reaper (lao thẳng/dash cực nhanh), Void Colossus (triệu hồi thêm quái nhỏ), Storm Dragon (bắn loạt đạn toả tròn tầm xa).
 
-## Deploy online (để người khác chơi)
+## Deploy Azure
 
 - **Netlify**: Kéo thả cả thư mục vào netlify.com/drop
 - **GitHub Pages**: Push lên repo → Settings → Pages
@@ -56,3 +56,4 @@ js/
     GameScene.js   # Logic chính
     ResultScene.js
 ```
+

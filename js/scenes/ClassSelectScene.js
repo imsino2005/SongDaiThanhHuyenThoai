@@ -3,6 +3,9 @@ class ClassSelectScene extends Phaser.Scene {
     super('ClassSelectScene');
   }
 
+  init() {
+  }
+
   create() {
     // Reset lại cờ chặn double-click mỗi khi vào scene này — nếu không reset,
     // sau lần đầu chọn nhân vật (startingGame = true), những lần quay lại
@@ -125,7 +128,9 @@ class ClassSelectScene extends Phaser.Scene {
       fontSize: '18px',
       color: '#9999bb'
     }).setInteractive({ useHandCursor: true });
-    backBtn.on('pointerdown', () => this.scene.start('TitleScene'));
+    backBtn.on('pointerdown', async () => {
+      this.scene.start('TitleScene');
+    });
   }
 
   // Đảm bảo các cấp Nâng Cấp (Sức Mạnh/Sinh Lực/Nhanh Nhẹn) mới nhất từ server trước
@@ -140,9 +145,14 @@ class ClassSelectScene extends Phaser.Scene {
         window.AuthAPI.user.upgrades = upgrades;
         localStorage.setItem('vs_user', JSON.stringify(window.AuthAPI.user));
       } catch (e) {
-        // Lỗi mạng/token — vẫn cho vào game với các cấp nâng cấp đã có sẵn, không chặn người chơi.
+        // Lỗi mạng/token — vẫn cho vào game với các nâng cấp đã có sẵn.
       }
     }
-    this.scene.start('GameScene', { classId, difficulty: this.selectedDiff });
+
+    this.scene.start('GameScene', {
+      classId,
+      difficulty: this.selectedDiff
+    });
   }
+
 }

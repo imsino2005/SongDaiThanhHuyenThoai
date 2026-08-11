@@ -74,61 +74,44 @@ class TitleScene extends Phaser.Scene {
       color: '#88ffaa'
     }).setOrigin(0.5);
 
-    const playBtn = this.add.text(width / 2, height * 0.58, '▶  PLAY', {
+    // Menu chính đặt ở trung tâm màn hình, không còn nút PLAY lớn hay Login ở góc.
+    const menuBtn = this.add.text(width / 2, height * 0.66, '☰  MENU', {
       fontFamily: 'Segoe UI, Arial',
-      fontSize: '34px',
+      fontSize: '24px',
       fontStyle: 'bold',
       color: '#ffffff',
       backgroundColor: '#5f5ce7',
-      padding: { x: 44, y: 16 },
-      shadow: { offsetX: 0, offsetY: 0, color: '#ffffff', blur: 8, stroke: false, fill: true }
-    }).setOrigin(0.5);
-    playBtn.setStroke('#ffffff', 2);
-    playBtn.setVisible(false);
-    playBtn.disableInteractive();
-
-    const updatePlayButton = () => {
-      const user = window.AuthAPI ? window.AuthAPI.user : null;
-      if (user) {
-        playBtn.setVisible(true);
-        playBtn.setInteractive({ useHandCursor: true });
-      } else {
-        playBtn.setVisible(false);
-        playBtn.disableInteractive();
-      }
-    };
-
-    // Nút Tài khoản/Login cố định ở góc trên trái: cho phép người dùng
-    // mở lại modal đăng nhập (nếu chưa đăng nhập) hoặc mở lại Main Menu
-    // (nếu đã đăng nhập) bất cứ lúc nào, kể cả khi đã lỡ đóng modal trước đó.
-    const accountBtn = this.add.text(16, 16, '👤 Login', {
-      fontFamily: 'Segoe UI, Arial',
-      fontSize: '15px',
-      color: '#ffffff',
-      backgroundColor: '#2c2f55',
-      padding: { x: 14, y: 8 }
-    }).setOrigin(0, 0).setInteractive({ useHandCursor: true });
-    accountBtn.on('pointerover', () => accountBtn.setStyle({ backgroundColor: '#3d4177' }));
-    accountBtn.on('pointerout', () => accountBtn.setStyle({ backgroundColor: '#2c2f55' }));
-    accountBtn.on('pointerdown', () => {
+      padding: { x: 48, y: 16 },
+      shadow: { offsetX: 0, offsetY: 6, color: '#000000', blur: 14, stroke: false, fill: true }
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    menuBtn.setStroke('#ffffff', 1);
+    menuBtn.on('pointerover', () => {
+      menuBtn.setStyle({ backgroundColor: '#7a72ff' });
+      menuBtn.setScale(1.05);
+    });
+    menuBtn.on('pointerout', () => {
+      menuBtn.setStyle({ backgroundColor: '#5f5ce7' });
+      menuBtn.setScale(1);
+    });
+    menuBtn.on('pointerdown', () => {
       if (!window.AuthAPI) return;
       window.AuthAPI.showModal(window.AuthAPI.user ? 'menu' : 'login');
     });
-    const updateAccountButton = () => {
+
+    const updateMenuButton = () => {
       const user = window.AuthAPI ? window.AuthAPI.user : null;
-      accountBtn.setText(user ? `👤 ${user.username}` : '👤 Login');
+      menuBtn.setText(user ? '☰  MENU' : '👤  LOGIN');
     };
 
-    // Nút "Play" bên trong Main Menu (modal) bắn sự kiện này sau khi tự đóng modal;
-    // cần lắng nghe ở đây để thực sự vào màn chọn nhân vật, nếu không nút đó sẽ không làm gì cả.
-    window.addEventListener('authPlayClicked', () => {
-      this.scene.start('ClassSelectScene');
-    });
-
-    window.addEventListener('authStatusChanged', () => {
-      updatePlayButton();
-      updateAccountButton();
-    });
+    // Main Menu điều hướng trực tiếp vào chế độ chơi đơn.
+    this._authPlayHandler = () => {
+      if (this.scene.isActive()) this.scene.start('ClassSelectScene');
+    };
+    this._authStatusHandler = () => {
+      updateMenuButton();
+    };
+    window.addEventListener('authPlayClicked', this._authPlayHandler);
+    window.addEventListener('authStatusChanged', this._authStatusHandler);
 
     const openLoginIfNeeded = () => {
       if (window.AuthAPI && !window.AuthAPI.user) {
@@ -136,37 +119,16 @@ class TitleScene extends Phaser.Scene {
       }
     };
     if (window.AuthAPI) {
-      // api.js đã init xong trước khi scene này chạy (trường hợp thường gặp)
-      updatePlayButton();
-      updateAccountButton();
+      updateMenuButton();
       openLoginIfNeeded();
     } else {
-      // Phòng khi authReady chưa kịp bắn (trường hợp hiếm)
       window.addEventListener('authReady', () => {
-        updatePlayButton();
-        updateAccountButton();
+        updateMenuButton();
         openLoginIfNeeded();
       });
     }
 
-    playBtn.on('pointerover', () => {
-      if (!playBtn.visible) return;
-      playBtn.setStyle({ backgroundColor: '#8b7cf7' });
-      playBtn.setScale(1.05);
-    });
-    playBtn.on('pointerout', () => {
-      if (!playBtn.visible) return;
-      playBtn.setStyle({ backgroundColor: '#6c5ce7' });
-      playBtn.setScale(1);
-    });
-    playBtn.on('pointerdown', () => {
-      if (window.AuthAPI && typeof window.AuthAPI.hideModal === 'function') {
-        window.AuthAPI.hideModal();
-      }
-      this.scene.start('ClassSelectScene');
-    });
-
-    this.add.text(width / 2, height * 0.88, 'WASD / Arrows to move  •  Auto Attack  •  ESC Pause  •  M Mute', {
+    this.add.text(width / 2, height * 0.84, 'WASD / Arrows to move  •  Auto Attack  •  ESC Pause  •  M Mute', {
       fontFamily: 'Segoe UI, Arial',
       fontSize: '14px',
       color: '#b0b8ff',
@@ -183,4 +145,9 @@ class TitleScene extends Phaser.Scene {
       muteBtn.setText(GameAudio.muted ? '🔇' : '🔊');
     });
   }
+  shutdown() {
+    if (this._authPlayHandler) window.removeEventListener('authPlayClicked', this._authPlayHandler);
+    if (this._authStatusHandler) window.removeEventListener('authStatusChanged', this._authStatusHandler);
+  }
+
 }

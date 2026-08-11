@@ -660,7 +660,7 @@ const ENEMY_TYPES = {
   grunt: { texture: 'enemy', hpMul: 1, spdMul: 1, dmgMul: 1, xp: 1, radius: 10, weight: 5 },
   fast: { texture: 'enemy_fast', hpMul: 0.55, spdMul: 2.1, dmgMul: 0.8, xp: 1, radius: 8, weight: 3, minTime: 20 },
   tank: { texture: 'enemy_tank', hpMul: 4.2, spdMul: 0.55, dmgMul: 1.8, xp: 3, radius: 17, weight: 2, minTime: 45 },
-  ranged: { texture: 'enemy_ranged', hpMul: 0.9, spdMul: 0.75, dmgMul: 0.7, xp: 2, radius: 11, weight: 2, minTime: 60, ranged: true, atkRange: 320, boltSpeed: 230, shotCooldown: 1700 },
+  ranged: { texture: 'enemy_ranged', hpMul: 0.9, spdMul: 0.75, dmgMul: 0.7, xp: 2, radius: 11, weight: 1, minTime: 90, ranged: true, atkRange: 320, boltSpeed: 230, shotCooldown: 1700 },
   swarm: { texture: 'enemy_swarm', hpMul: 0.3, spdMul: 1.6, dmgMul: 0.5, xp: 1, radius: 6, weight: 6, minTime: 0 }
 };
 
