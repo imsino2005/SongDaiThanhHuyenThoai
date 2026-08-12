@@ -53,6 +53,7 @@ class GameScene extends Phaser.Scene {
     this.projectiles = this.physics.add.group();
     this.gems = this.physics.add.group();
     this.magnets = this.physics.add.group();
+    this.magnetizedGems = []; // gem đang bay vào người sau khi lụm Nam Châm
     this.chests = this.physics.add.group();
     this.turrets = this.physics.add.group();
     this.drones = this.physics.add.group();
@@ -230,6 +231,7 @@ class GameScene extends Phaser.Scene {
         if (this.applySaveData(saveData)) {
           this.updateUI();
           this.updateSkillPanel();
+          this.showToast('Đã load file save thành công!', true);
         }
       });
     }
@@ -283,6 +285,8 @@ class GameScene extends Phaser.Scene {
 
     // HP
     this.hpBarBg = this.add.rectangle(24, 20, 232, 18, 0x111928).setOrigin(0).setScrollFactor(0).setDepth(101);
+    // Thanh "chip damage" — hiển thị máu vừa mất, rút chậm dần để người chơi thấy rõ vừa bị đánh bao nhiêu
+    this.hpBarTrail = this.add.rectangle(24, 20, 232, 18, 0xffa64d, 0.55).setOrigin(0).setScrollFactor(0).setDepth(101.5);
     this.hpBar = this.add.rectangle(24, 20, 232, 18, 0x44ff88).setOrigin(0).setScrollFactor(0).setDepth(102);
     this.hpText = this.add.text(24, 17, '', { fontSize: '12px', color: '#eef6ff', fontFamily: 'Segoe UI' }).setScrollFactor(0).setDepth(103);
 
@@ -299,12 +303,26 @@ class GameScene extends Phaser.Scene {
       fontSize: '13px', color: '#8ec7ff', fontFamily: 'Segoe UI'
     }).setScrollFactor(0).setDepth(103);
 
-    this.skillPanelBg = this.add.rectangle(w - 16 - 282, h - 16 - 164, 282, 164, 0x08111f, 0.82)
-      .setOrigin(0, 0).setScrollFactor(0).setDepth(100).setStrokeStyle(1, 0x5d7cc3, 0.8);
-    this.skillPanelTitle = this.add.text(w - 16 - 14 - 282, h - 16 - 156, 'SKILL PANEL', {
+    this.skillPanelBg = this.add.rectangle(w - 16 - 282, h - 16 - 190, 282, 190, 0x08111f, 0.84)
+      .setOrigin(0, 0).setScrollFactor(0).setDepth(100).setStrokeStyle(1, 0x5d7cc3, 0.85);
+    // Vệt sáng mảnh phía trên panel cho cảm giác có chiều sâu hơn khung phẳng đơn sắc.
+    this.skillPanelAccent = this.add.rectangle(w - 16 - 282, h - 16 - 190, 282, 3, 0x7aa6ff, 0.55)
+      .setOrigin(0, 0).setScrollFactor(0).setDepth(101);
+    this.skillPanelTitle = this.add.text(w - 16 - 14 - 282, h - 16 - 178, 'SKILL PANEL', {
       fontSize: '14px', color: '#b7d7ff', fontFamily: 'Segoe UI', fontStyle: 'bold'
     }).setOrigin(0, 0).setScrollFactor(0).setDepth(102);
-    this.skillPanelContainer = this.add.container(w - 16 - 272, h - 16 - 130).setScrollFactor(0).setDepth(102);
+    this.skillPanelContainer = this.add.container(w - 16 - 272, h - 16 - 152).setScrollFactor(0).setDepth(102);
+
+    // Tooltip dùng chung cho mọi icon skill (ẩn mặc định, hiện khi hover/tap).
+    this.skillTooltipBg = this.add.rectangle(0, 0, 10, 10, 0x0b1220, 0.96)
+      .setOrigin(0, 1).setScrollFactor(0).setDepth(600).setStrokeStyle(1, 0x6c9ee8, 0.9).setVisible(false);
+    this.skillTooltipTitle = this.add.text(0, 0, '', {
+      fontSize: '13px', color: '#ffe9a8', fontFamily: 'Segoe UI', fontStyle: 'bold'
+    }).setOrigin(0, 1).setScrollFactor(0).setDepth(601).setVisible(false);
+    this.skillTooltipDesc = this.add.text(0, 0, '', {
+      fontSize: '11px', color: '#c7d2ee', fontFamily: 'Segoe UI', wordWrap: { width: 210 }
+    }).setOrigin(0, 1).setScrollFactor(0).setDepth(601).setVisible(false);
+    this._skillTooltipHideEvent = null;
 
     this.timeText = this.add.text(w - 16, 16, '0:00', {
       fontSize: '24px', color: '#fff', fontFamily: 'Segoe UI', fontStyle: 'bold'
@@ -442,6 +460,7 @@ class GameScene extends Phaser.Scene {
     this.spawnEnemies(delta);
     this.updateEnemies(delta);
     this.attractGems();
+    this.updateMagnetizedGems(delta);
     this.updateHpRegen(delta);
     this.updateKillStreak(delta);
     this.updateUI();
@@ -774,9 +793,9 @@ class GameScene extends Phaser.Scene {
   }
 
   attachTrail(bullet, vfx, tint) {
-    // Lightweight trail: small fading circles along path via timer
+    // Trail riêng theo từng loại vũ khí thay vì 1 kiểu vòng tròn chung chung cho tất cả.
     bullet.trailEvent = this.time.addEvent({
-      delay: 40,
+      delay: vfx === 'lightning' ? 55 : 40,
       loop: true,
       callback: () => {
         if (!bullet.active) {
@@ -784,11 +803,46 @@ class GameScene extends Phaser.Scene {
           return;
         }
         const col = tint || 0xffffff;
-        const p = this.add.circle(bullet.x, bullet.y, vfx === 'fire' ? 5 : 3, col, 0.55).setDepth(5);
-        this.tweens.add({
-          targets: p, alpha: 0, scale: 0.2, duration: 200,
-          onComplete: () => p.destroy()
-        });
+
+        if (vfx === 'fire') {
+          // Tàn lửa nhỏ bay lệch hướng và trôi nhẹ lên trên như tro tàn
+          const ember = this.add.circle(bullet.x + Phaser.Math.Between(-3, 3), bullet.y + Phaser.Math.Between(-3, 3),
+            Phaser.Math.Between(2, 5), Phaser.Math.RND.pick([0xff6622, 0xffaa33, 0xffdd66]), 0.85)
+            .setDepth(5).setBlendMode(Phaser.BlendModes.ADD);
+          this.tweens.add({ targets: ember, y: ember.y - 10, alpha: 0, scale: 0.2, duration: 320, onComplete: () => ember.destroy() });
+
+        } else if (vfx === 'ice') {
+          // Mảnh băng nhỏ xoay tròn, để lại vệt lạnh lẽo
+          const shard = this.add.rectangle(bullet.x, bullet.y, 5, 5, 0x9be8ff, 0.8).setDepth(5).setBlendMode(Phaser.BlendModes.ADD);
+          shard.setRotation(Math.random() * Math.PI);
+          this.tweens.add({ targets: shard, alpha: 0, angle: '+=90', scale: 0.3, duration: 260, onComplete: () => shard.destroy() });
+
+        } else if (vfx === 'lightning') {
+          // Tia chớp nhỏ giật lệch ngẫu nhiên hai bên đường bay, sáng chói và biến mất nhanh
+          const off = Phaser.Math.Between(-6, 6);
+          const angle = bullet.rotation + Math.PI / 2;
+          const zap = this.add.rectangle(
+            bullet.x + Math.cos(angle) * off, bullet.y + Math.sin(angle) * off,
+            10, 2, 0xffee66, 0.95
+          ).setDepth(5).setRotation(bullet.rotation).setBlendMode(Phaser.BlendModes.ADD);
+          this.tweens.add({ targets: zap, alpha: 0, duration: 140, onComplete: () => zap.destroy() });
+
+        } else if (vfx === 'orb') {
+          // Vệt cầu năng lượng mềm, to và mờ dần chậm, sáng cộng dồn (additive)
+          const glow = this.add.circle(bullet.x, bullet.y, 7, col, 0.5).setDepth(5).setBlendMode(Phaser.BlendModes.ADD);
+          this.tweens.add({ targets: glow, alpha: 0, scale: 1.6, duration: 380, onComplete: () => glow.destroy() });
+
+        } else if (vfx === 'arrow' || vfx === 'pierce') {
+          // Vệt streak kéo dài theo hướng bay, giống luồng gió của mũi tên thay vì đốm tròn
+          const streak = this.add.rectangle(bullet.x, bullet.y, 14, 2, col, 0.5)
+            .setDepth(5).setRotation(bullet.rotation);
+          this.tweens.add({ targets: streak, alpha: 0, scaleX: 0.3, duration: 180, onComplete: () => streak.destroy() });
+
+        } else {
+          // Mặc định: vòng tròn mờ dần như cũ, dùng cho đạn thường/plasma...
+          const p = this.add.circle(bullet.x, bullet.y, 3, col, 0.55).setDepth(5);
+          this.tweens.add({ targets: p, alpha: 0, scale: 0.2, duration: 200, onComplete: () => p.destroy() });
+        }
       }
     });
   }
@@ -1521,6 +1575,7 @@ class GameScene extends Phaser.Scene {
     enemy.hp -= finalDmg;
     this.hitParticles.emitParticleAt(enemy.x, enemy.y, isCrit ? 7 : 3);
     this.sfxHit();
+    if (isCrit) this.cameras.main.shake(45, 0.003); // rung nhẹ camera khi chí mạng, tạo cảm giác nặng tay
 
     // Floating damage
     this.showFloatingText(enemy.x, enemy.y - 15, Math.floor(finalDmg) + (isCrit ? '!' : ''), isCrit ? '#ffee44' : '#ffffff');
@@ -1575,7 +1630,7 @@ class GameScene extends Phaser.Scene {
 
   attractGems() {
     this.gems.getChildren().forEach(gem => {
-      if (!gem.active) return;
+      if (!gem.active || gem.isMagnetized) return;
       const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, gem.x, gem.y);
       if (dist < this.stats.pickupRange) {
         const angle = Phaser.Math.Angle.Between(gem.x, gem.y, this.player.x, this.player.y);
@@ -1598,17 +1653,46 @@ class GameScene extends Phaser.Scene {
     this.sfxPickup();
     this.showFloatingText(this.player.x, this.player.y - 40, 'NAM CHÂM!', '#ff6666');
 
-    let gained = 0;
-    this.gems.getChildren().forEach(gem => {
-      if (!gem.active) return;
-      gained += gem.xpValue;
-      this.xpParticles.emitParticleAt(gem.x, gem.y, 4);
-      gem.destroy();
+    // Hút TOÀN BỘ exp đang tồn tại trên map (kể cả rớt từ trước), cho bay vào người rồi mới cộng điểm
+    this.gems.getChildren().forEach((gem, i) => {
+      if (!gem.active || gem.isMagnetized) return;
+      gem.isMagnetized = true;
+      if (gem.body) gem.body.enable = false;
+      // bay tới người với độ trễ nhỏ tăng dần, tạo hiệu ứng dòng exp đổ về
+      gem.magnetDelay = i * 20;
+      gem.magnetSpeed = 900 + Math.random() * 300;
+      this.magnetizedGems.push(gem);
     });
-    if (gained > 0) {
-      this.xp += gained * this.stats.xpGain;
-      if (this.xp >= this.xpToNext) this.levelUp();
-    }
+  }
+
+  // Di chuyển các gem đã bị Nam Châm hút, cho chúng bay lượn vào người rồi cộng EXP
+  updateMagnetizedGems(delta) {
+    if (this.magnetizedGems.length === 0) return;
+    const dt = delta / 1000;
+    this.magnetizedGems = this.magnetizedGems.filter(gem => {
+      if (!gem.active) return false;
+
+      if (gem.magnetDelay > 0) {
+        gem.magnetDelay -= delta;
+        return true;
+      }
+
+      const dist = Phaser.Math.Distance.Between(gem.x, gem.y, this.player.x, this.player.y);
+      if (dist < 14) {
+        this.xpParticles.emitParticleAt(gem.x, gem.y, 4);
+        this.xp += gem.xpValue * this.stats.xpGain;
+        gem.destroy();
+        if (this.xp >= this.xpToNext) this.levelUp();
+        return false;
+      }
+
+      const angle = Phaser.Math.Angle.Between(gem.x, gem.y, this.player.x, this.player.y);
+      const speed = gem.magnetSpeed * (1 + (1 - Math.min(dist, 600) / 600)); // càng gần càng lao nhanh
+      gem.x += Math.cos(angle) * speed * dt;
+      gem.y += Math.sin(angle) * speed * dt;
+      gem.setScale(Math.max(0.4, gem.scale - dt * 0.6));
+      return true;
+    });
   }
 
   // ========== RƯƠNG (Chest) — rớt khi hạ boss, nhặt để roll 1 passive ngẫu nhiên ==========
@@ -1673,7 +1757,43 @@ class GameScene extends Phaser.Scene {
     this.physics.pause();
     this.setJoyZoneVisible(false);
     this.sfxLevel();
+    this.playLevelUpBurst();
     this.showLevelUpUI();
+  }
+
+  // Hiệu ứng nổ ánh sáng vàng quanh người chơi + flash thanh EXP mỗi khi lên cấp
+  playLevelUpBurst() {
+    // Flash nhanh trên thanh EXP để báo hiệu vừa đầy
+    if (this.xpBar) {
+      this.tweens.add({ targets: this.xpBar, alpha: 0.25, duration: 90, yoyo: true, repeat: 2 });
+    }
+
+    const ring = this.add.circle(this.player.x, this.player.y, 10, 0xffdd88, 0).setStrokeStyle(3, 0xffdd88, 1).setDepth(45);
+    this.tweens.add({
+      targets: ring,
+      radius: 90,
+      alpha: { from: 1, to: 0 },
+      duration: 500,
+      ease: 'Cubic.Out',
+      onUpdate: () => ring.setStrokeStyle(3, 0xffdd88, ring.alpha),
+      onComplete: () => ring.destroy()
+    });
+
+    // Hạt sáng bắn tỏa tròn quanh player
+    const burstCount = 14;
+    for (let i = 0; i < burstCount; i++) {
+      const angle = (Math.PI * 2 * i) / burstCount;
+      const spark = this.add.circle(this.player.x, this.player.y, 3, 0xffe9a8, 1).setDepth(46);
+      this.tweens.add({
+        targets: spark,
+        x: this.player.x + Math.cos(angle) * 70,
+        y: this.player.y + Math.sin(angle) * 70,
+        alpha: 0,
+        duration: 450 + Math.random() * 150,
+        ease: 'Cubic.Out',
+        onComplete: () => spark.destroy()
+      });
+    }
   }
 
   showLevelUpUI() {
@@ -1682,6 +1802,7 @@ class GameScene extends Phaser.Scene {
     const cy = cam.scrollY + cam.height / 2;
 
     this.levelUpContainer = this.add.container(0, 0).setDepth(200);
+    this._levelUpGlowTweens = [];
 
     const overlay = this.add.rectangle(cx, cy, cam.width + 20, cam.height + 20, 0x000000, 0.72);
     this.levelUpContainer.add(overlay);
@@ -1699,9 +1820,53 @@ class GameScene extends Phaser.Scene {
       const isUp = choice.type === 'upgrade';
       const bg = isEvo ? 0x2a2040 : (isUp ? 0x1a2a22 : 0x1a1a2e);
       const stroke = isEvo ? 0xffdd88 : (isUp ? 0x66cc88 : 0x6c5ce7);
-      const card = this.add.rectangle(cx, y, 540, 90, bg)
+      const CARD_W = 540, CARD_H = 90;
+      const card = this.add.rectangle(cx, y, CARD_W, CARD_H, bg)
         .setStrokeStyle(2, stroke)
         .setInteractive({ useHandCursor: true });
+
+      // ---- Glow pulse riêng cho evolution: viền phát sáng nhấp nháy để
+      // nổi bật lựa chọn mạnh nhất trong danh sách. Vẽ bằng Graphics tách
+      // biệt (nằm dưới card) để không ảnh hưởng viền gốc của rectangle. ----
+      let glow = null, glowTween = null;
+      if (isEvo) {
+        glow = this.add.graphics();
+        const drawGlow = (thickness, alpha) => {
+          glow.clear();
+          glow.lineStyle(thickness, 0xffdd88, alpha);
+          glow.strokeRoundedRect(cx - CARD_W / 2 - thickness, y - CARD_H / 2 - thickness,
+            CARD_W + thickness * 2, CARD_H + thickness * 2, 10);
+        };
+        drawGlow(3, 0.5);
+        const glowState = { t: 3, a: 0.5 };
+        glowTween = this.tweens.add({
+          targets: glowState,
+          t: 7, a: 0.15,
+          duration: 900,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+          onUpdate: () => drawGlow(glowState.t, glowState.a)
+        });
+        this._levelUpGlowTweens.push(glowTween);
+      }
+
+      // ---- Huy hiệu rarity ở góc trên-phải thẻ ----
+      const rarityMap = {
+        evolution: { icon: '\u2726', color: '#ffdd88', bgColor: 0x3a2f18 }, // ✦
+        upgrade: { icon: '\u2605', color: '#88ffb0', bgColor: 0x173a26 },   // ★
+        weapon: { icon: '\u25C6', color: '#c9b3ff', bgColor: 0x2a2048 },   // ◆
+        passive: { icon: '\u25C6', color: '#8fd0ff', bgColor: 0x1a2a3a }, // ◆
+        stat: { icon: '\u25CF', color: '#dddddd', bgColor: 0x2a2a2a }     // ●
+      };
+      const rarity = rarityMap[choice.type] || rarityMap.stat;
+      const badgeX = cx + CARD_W / 2 - 20;
+      const badgeY = y - CARD_H / 2 + 16;
+      const badgeBg = this.add.circle(badgeX, badgeY, 12, rarity.bgColor, 0.95)
+        .setStrokeStyle(1.5, Phaser.Display.Color.HexStringToColor(rarity.color).color, 0.9);
+      const badgeIcon = this.add.text(badgeX, badgeY, rarity.icon, {
+        fontSize: '13px', color: rarity.color, fontStyle: 'bold', fontFamily: 'Segoe UI'
+      }).setOrigin(0.5);
 
       let iconKey = null;
       if (choice.type === 'weapon' || choice.type === 'evolution' || choice.type === 'upgrade') {
@@ -1785,7 +1950,7 @@ class GameScene extends Phaser.Scene {
       }
 
       // slide-in
-      const allObjs = [card, icon, label, desc, ...reqItems];
+      const allObjs = [card, ...(glow ? [glow] : []), badgeBg, badgeIcon, icon, label, desc, ...reqItems];
       allObjs.forEach(o => { o.x += 80; o.setAlpha(0); });
       this.levelUpContainer.add(allObjs);
       this.tweens.add({
@@ -1793,9 +1958,46 @@ class GameScene extends Phaser.Scene {
         x: '-=80', alpha: 1, duration: 280, delay: i * 70, ease: 'Cubic.Out'
       });
 
-      card.on('pointerover', () => { card.setFillStyle(isEvo ? 0x3a3060 : 0x2a2a4e); card.setScale(1.02); });
-      card.on('pointerout', () => { card.setFillStyle(bg); card.setScale(1); });
+      // ---- Particle nhỏ khi hover: vài hạt lấp lánh bay lên quanh viền
+      // thẻ, dừng phát khi rời chuột và tự huỷ để không rò rỉ bộ nhớ. ----
+      let hoverParticles = null;
+      const startHoverParticles = () => {
+        if (hoverParticles) return;
+        hoverParticles = this.add.particles(0, 0, 'particle', {
+          x: { min: cx - CARD_W / 2 + 10, max: cx + CARD_W / 2 - 10 },
+          y: { min: y - CARD_H / 2, max: y + CARD_H / 2 },
+          lifespan: 500,
+          speedY: { min: -30, max: -10 },
+          speedX: { min: -6, max: 6 },
+          scale: { start: 0.35, end: 0 },
+          alpha: { start: 0.8, end: 0 },
+          tint: isEvo ? 0xffdd88 : (isUp ? 0x66cc88 : 0x9d8dff),
+          frequency: 60,
+          quantity: 1
+        }).setDepth(199);
+        this.levelUpContainer.add(hoverParticles);
+      };
+      const stopHoverParticles = () => {
+        if (!hoverParticles) return;
+        hoverParticles.stop();
+        this.time.delayedCall(500, () => { if (hoverParticles) { hoverParticles.destroy(); hoverParticles = null; } });
+      };
+
+      card.on('pointerover', () => {
+        card.setFillStyle(isEvo ? 0x3a3060 : 0x2a2a4e);
+        card.setScale(1.02);
+        badgeBg.setScale(1.15);
+        startHoverParticles();
+      });
+      card.on('pointerout', () => {
+        card.setFillStyle(bg);
+        card.setScale(1);
+        badgeBg.setScale(1);
+        stopHoverParticles();
+      });
       card.on('pointerdown', () => {
+        if (glowTween) glowTween.stop();
+        stopHoverParticles();
         this.applyChoice(choice);
         this.closeLevelUp();
       });
@@ -1944,6 +2146,7 @@ class GameScene extends Phaser.Scene {
       this.evoParticles.emitParticleAt(this.player.x, this.player.y, 24);
       this.showFloatingText(this.player.x, this.player.y - 50, 'EVOLVED!', '#ffee88');
       this.sfxEvo();
+      this.playEvolveBurst();
     } else if (choice.type === 'stat') {
       if (choice.id === 'damage') this.stats.damage *= 1.18;
       if (choice.id === 'hp') {
@@ -1952,6 +2155,50 @@ class GameScene extends Phaser.Scene {
       }
     }
     this.updateWeaponIcons();
+  }
+
+  // Hiệu ứng bùng nổ hào quang tím-vàng khi tiến hóa vũ khí — mạnh và dài hơi hơn level up
+  // vì đây là mốc hiếm, đáng chú ý nhất trong 1 lượt chơi.
+  playEvolveBurst() {
+    this.cameras.main.shake(180, 0.006);
+
+    // Hai vòng tròn lan ra lệch thời gian, tạo cảm giác dồn dập
+    [0, 120].forEach(delay => {
+      this.time.delayedCall(delay, () => {
+        const ring = this.add.circle(this.player.x, this.player.y, 10, 0xd9aaff, 0)
+          .setStrokeStyle(4, 0xffe6a8, 1).setDepth(45);
+        this.tweens.add({
+          targets: ring, radius: 130, alpha: { from: 1, to: 0 }, duration: 650, ease: 'Cubic.Out',
+          onUpdate: () => ring.setStrokeStyle(4, 0xffe6a8, ring.alpha),
+          onComplete: () => ring.destroy()
+        });
+      });
+    });
+
+    // Cột tia sáng bắn thẳng lên trời tại vị trí người chơi
+    const beam = this.add.rectangle(this.player.x, this.player.y, 10, 220, 0xffe6a8, 0.65)
+      .setOrigin(0.5, 1).setDepth(44).setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({
+      targets: beam, alpha: 0, scaleX: 0.2, y: this.player.y - 20, duration: 500, ease: 'Cubic.Out',
+      onComplete: () => beam.destroy()
+    });
+
+    // Hạt sáng bắn tỏa dày hơn level up thường, pha 2 màu tím/vàng
+    const burstCount = 22;
+    for (let i = 0; i < burstCount; i++) {
+      const angle = (Math.PI * 2 * i) / burstCount + Math.random() * 0.2;
+      const color = i % 2 === 0 ? 0xffe6a8 : 0xd9aaff;
+      const spark = this.add.circle(this.player.x, this.player.y, 3.5, color, 1).setDepth(46);
+      this.tweens.add({
+        targets: spark,
+        x: this.player.x + Math.cos(angle) * 100,
+        y: this.player.y + Math.sin(angle) * 100,
+        alpha: 0,
+        duration: 550 + Math.random() * 200,
+        ease: 'Cubic.Out',
+        onComplete: () => spark.destroy()
+      });
+    }
   }
 
   applyPassive(id) {
@@ -1976,6 +2223,10 @@ class GameScene extends Phaser.Scene {
   }
 
   closeLevelUp() {
+    if (this._levelUpGlowTweens) {
+      this._levelUpGlowTweens.forEach(t => t.stop());
+      this._levelUpGlowTweens = null;
+    }
     if (this.levelUpContainer) {
       this.levelUpContainer.destroy();
       this.levelUpContainer = null;
@@ -1997,8 +2248,45 @@ class GameScene extends Phaser.Scene {
 
     this.chestRollContainer = this.add.container(0, 0).setDepth(200);
 
-    const overlay = this.add.rectangle(cx, cy, cam.width + 20, cam.height + 20, 0x000000, 0.78);
+    const overlay = this.add.rectangle(cx, cy, cam.width + 20, cam.height + 20, 0x000000, 0.8);
     this.chestRollContainer.add(overlay);
+
+    // Tia sáng vàng xoay chậm phía sau, tạo cảm giác "rương báu" thay vì nền đen trơn
+    const rays = this.add.graphics().setAlpha(0.22);
+    const rayCount = 10;
+    for (let i = 0; i < rayCount; i++) {
+      const a = (Math.PI * 2 * i) / rayCount;
+      rays.fillStyle(0xffd166, 1);
+      rays.beginPath();
+      rays.moveTo(cx, cy);
+      rays.arc(cx, cy, 900, a, a + 0.09, false);
+      rays.closePath();
+      rays.fillPath();
+    }
+    this.chestRollContainer.add(rays);
+    const raysTween = this.tweens.add({
+      targets: rays, rotation: Math.PI * 2, duration: 20000, repeat: -1, ease: 'Linear'
+    });
+    this._chestRollRaysTween = raysTween;
+
+    // Glow tròn phát sáng phía sau tiêu đề
+    const titleGlow = this.add.circle(cx, cy - 155, 130, 0xffd166, 0.18).setBlendMode(Phaser.BlendModes.ADD);
+    this.chestRollContainer.add(titleGlow);
+    const titleGlowTween = this.tweens.add({
+      targets: titleGlow, scale: { from: 0.9, to: 1.15 }, alpha: { from: 0.22, to: 0.1 },
+      duration: 900, yoyo: true, repeat: -1, ease: 'Sine.InOut'
+    });
+    if (!this._chestGlowTweens) this._chestGlowTweens = [];
+    this._chestGlowTweens.push(titleGlowTween);
+
+    const chestIcon = this.add.text(cx, cy - 205, '💰', { fontSize: '40px' }).setOrigin(0.5).setScale(0);
+    this.chestRollContainer.add(chestIcon);
+    this.tweens.add({ targets: chestIcon, scale: 1, duration: 350, ease: 'Back.Out', delay: 80 });
+    const iconWobbleTween = this.tweens.add({
+      targets: chestIcon, angle: { from: -6, to: 6 }, duration: 700, yoyo: true, repeat: -1,
+      ease: 'Sine.InOut', delay: 450
+    });
+    this._chestGlowTweens.push(iconWobbleTween);
 
     const title = this.add.text(cx, cy - 165, '✦ RƯƠNG BOSS — CHỌN 1 PASSIVE ✦', {
       fontSize: '26px', color: '#ffd166', fontStyle: 'bold', fontFamily: 'Segoe UI'
@@ -2010,16 +2298,36 @@ class GameScene extends Phaser.Scene {
     const startY = cy - 60;
     choices.forEach((choice, i) => {
       const y = startY + i * 100;
-      const card = this.add.rectangle(cx, y, 540, 90, 0x241a0d)
+      const CARD_W = 540, CARD_H = 90;
+      const card = this.add.rectangle(cx, y, CARD_W, CARD_H, 0x241a0d)
         .setStrokeStyle(2, 0xffd166)
         .setInteractive({ useHandCursor: true });
 
+      // Viền vàng phát sáng nhấp nháy quanh mỗi lựa chọn — cả 3 đều là phần thưởng
+      // hiếm từ rương boss nên xứng đáng có hào quang thay vì viền tĩnh như card thường.
+      const glow = this.add.graphics();
+      const drawGlow = (thickness, alpha) => {
+        glow.clear();
+        glow.lineStyle(thickness, 0xffd166, alpha);
+        glow.strokeRoundedRect(cx - CARD_W / 2 - thickness, y - CARD_H / 2 - thickness,
+          CARD_W + thickness * 2, CARD_H + thickness * 2, 10);
+      };
+      drawGlow(2, 0.35);
+      const glowState = { t: 2, a: 0.35 };
+      const glowTween = this.tweens.add({
+        targets: glowState, t: 5, a: 0.12, duration: 900 + i * 120, yoyo: true, repeat: -1,
+        ease: 'Sine.InOut', onUpdate: () => drawGlow(glowState.t, glowState.a)
+      });
+      if (!this._chestGlowTweens) this._chestGlowTweens = [];
+      this._chestGlowTweens.push(glowTween);
+
       const iconKey = choice.type === 'passive' ? 'icon_pas_' + choice.id : null;
+      const iconBadge = this.add.circle(cx - 240, y, 26, 0x3a2a12, 0.9).setStrokeStyle(1.5, 0xffd166, 0.7);
       let icon;
       if (iconKey && this.textures.exists(iconKey)) {
-        icon = this.add.image(cx - 240, y, iconKey).setDisplaySize(44, 44);
+        icon = this.add.image(cx - 240, y, iconKey).setDisplaySize(38, 38);
       } else {
-        icon = this.add.rectangle(cx - 240, y, 44, 44, 0x6b4423);
+        icon = this.add.rectangle(cx - 240, y, 34, 34, 0x6b4423);
       }
 
       const label = this.add.text(cx - 205, y - 16, choice.title, {
@@ -2029,7 +2337,7 @@ class GameScene extends Phaser.Scene {
         fontSize: '12px', color: '#c9a876', fontFamily: 'Segoe UI', wordWrap: { width: 400 }
       });
 
-      const allObjs = [card, icon, label, desc];
+      const allObjs = [card, glow, iconBadge, icon, label, desc];
       allObjs.forEach(o => { o.x += 80; o.setAlpha(0); });
       this.chestRollContainer.add(allObjs);
       this.tweens.add({
@@ -2039,6 +2347,16 @@ class GameScene extends Phaser.Scene {
       card.on('pointerover', () => { card.setFillStyle(0x3a2a12); card.setScale(1.02); });
       card.on('pointerout', () => { card.setFillStyle(0x241a0d); card.setScale(1); });
       card.on('pointerdown', () => {
+        if (this._chestGlowTweens) { this._chestGlowTweens.forEach(t => t.stop()); this._chestGlowTweens = null; }
+        // Bùng sáng vàng ngay tại lựa chọn vừa chọn trước khi đóng UI
+        for (let p = 0; p < 16; p++) {
+          const spark = this.add.circle(card.x, card.y, 3, 0xffd166, 1).setDepth(210);
+          const a = Math.random() * Math.PI * 2;
+          this.tweens.add({
+            targets: spark, x: card.x + Math.cos(a) * 80, y: card.y + Math.sin(a) * 80,
+            alpha: 0, duration: 350, ease: 'Cubic.Out', onComplete: () => spark.destroy()
+          });
+        }
         this.applyChestChoice(choice);
         this.closeChestRoll();
       });
@@ -2073,6 +2391,8 @@ class GameScene extends Phaser.Scene {
   }
 
   closeChestRoll() {
+    if (this._chestGlowTweens) { this._chestGlowTweens.forEach(t => t.stop()); this._chestGlowTweens = null; }
+    if (this._chestRollRaysTween) { this._chestRollRaysTween.stop(); this._chestRollRaysTween = null; }
     if (this.chestRollContainer) {
       this.chestRollContainer.destroy();
       this.chestRollContainer = null;
@@ -2086,6 +2406,13 @@ class GameScene extends Phaser.Scene {
   updateUI() {
     const hpRatio = Math.max(0, this.stats.hp / this.stats.maxHp);
     this.hpBar.width = 232 * hpRatio;
+
+    // Trail "chip damage": khi mất máu, thanh cam rút chậm theo sau để thấy rõ vừa mất bao nhiêu;
+    // khi hồi máu thì bám sát ngay lập tức (không có độ trễ khi hồi).
+    if (this.hpTrailRatio === undefined) this.hpTrailRatio = hpRatio;
+    this.hpTrailRatio = hpRatio >= this.hpTrailRatio ? hpRatio : Math.max(hpRatio, this.hpTrailRatio - 0.008);
+    this.hpBarTrail.width = 232 * this.hpTrailRatio;
+
     if (hpRatio > 0.5) this.hpBar.setFillStyle(0x44ff88);
     else if (hpRatio > 0.25) this.hpBar.setFillStyle(0xffcc44);
     else {
@@ -2097,7 +2424,11 @@ class GameScene extends Phaser.Scene {
     this.hpText.setText(`${Math.ceil(this.stats.hp)} / ${Math.ceil(this.stats.maxHp)}`);
 
     const xpRatio = Phaser.Math.Clamp(this.xp / this.xpToNext, 0, 1);
-    this.xpBar.width = 232 * xpRatio;
+    // Fill mượt bằng lerp thay vì snap ngay, cảm giác "đổ" exp vào thanh tự nhiên hơn.
+    if (this.xpDisplayRatio === undefined) this.xpDisplayRatio = xpRatio;
+    this.xpDisplayRatio += (xpRatio - this.xpDisplayRatio) * 0.18;
+    if (Math.abs(xpRatio - this.xpDisplayRatio) < 0.002) this.xpDisplayRatio = xpRatio;
+    this.xpBar.width = 232 * this.xpDisplayRatio;
     this.levelText.setText(`Lv ${this.level}`);
     this.xpText.setText(`${Math.floor(this.xp)} / ${this.xpToNext} XP`);
     this.updateSkillPanel();
@@ -2112,12 +2443,15 @@ class GameScene extends Phaser.Scene {
   showFloatingText(x, y, text, color) {
     const t = this.add.text(x, y, text, {
       fontSize: '16px', color: color || '#fff', fontStyle: 'bold', fontFamily: 'Segoe UI', shadow: { offsetX: 0, offsetY: 0, color: '#000000', blur: 10, stroke: false, fill: true }
-    }).setOrigin(0.5).setDepth(50);
+    }).setOrigin(0.5).setDepth(50).setScale(0.4);
+    // Pop-in nhanh rồi mới bay lên mờ dần, thay vì hiện cứng ngay full size
+    this.tweens.add({ targets: t, scale: 1, duration: 90, ease: 'Back.Out' });
     this.tweens.add({
       targets: t,
       y: y - 40,
       alpha: 0,
       duration: 700,
+      delay: 90,
       onComplete: () => t.destroy()
     });
   }
@@ -2126,51 +2460,140 @@ class GameScene extends Phaser.Scene {
     if (!this.skillPanelContainer) return;
     this.skillPanelContainer.removeAll(true);
 
-    const rowY = 0;
-    const iconSize = 30;
-    const padding = 8;
-    const maxIcons = 7;
-    const entries = [];
+    const iconSize = 26;
+    const cellW = 36;
+    const cellH = 48;
+    const cols = 7;
+    const maxIcons = 12;
 
     const weaponIds = Object.keys(this.weaponLevels);
-    weaponIds.forEach((id, index) => {
-      if (index >= maxIcons) return;
-      const key = 'icon_' + id;
-      const icon = this.textures.exists(key)
-        ? this.add.image(index * (iconSize + padding), rowY, key).setDisplaySize(iconSize, iconSize)
-        : this.add.rectangle(index * (iconSize + padding), rowY, iconSize, iconSize, 0x22334a);
-      icon.setOrigin(0, 0);
-      this.skillPanelContainer.add(icon);
-      const lv = this.add.text(index * (iconSize + padding) + iconSize / 2, rowY + iconSize + 4, 'L' + this.weaponLevels[id], {
-        fontSize: '10px', color: '#d7d7ff', fontFamily: 'Segoe UI', fontStyle: 'bold'
-      }).setOrigin(0.5, 0);
-      this.skillPanelContainer.add(lv);
-      entries.push(icon, lv);
+    const passiveIds = this.ownedPassives || [];
+    const entries = [];
+
+    weaponIds.forEach(id => {
+      const isEvo = typeof EVOLUTIONS !== 'undefined' && !!EVOLUTIONS[id];
+      entries.push({ kind: isEvo ? 'evolution' : 'weapon', id, level: this.weaponLevels[id] });
+    });
+    passiveIds.forEach(id => {
+      entries.push({ kind: 'passive', id, level: null });
     });
 
-    if (this.ownedPassives.length > 0 && weaponIds.length < maxIcons) {
-      const offset = weaponIds.length * (iconSize + padding);
-      this.ownedPassives.slice(0, maxIcons - weaponIds.length).forEach((id, index) => {
-        const key = 'icon_pas_' + id;
-        const icon = this.textures.exists(key)
-          ? this.add.image(offset + index * (iconSize + padding), rowY, key).setDisplaySize(iconSize, iconSize)
-          : this.add.rectangle(offset + index * (iconSize + padding), rowY, iconSize, iconSize, 0x22334a);
-        icon.setOrigin(0, 0);
-        this.skillPanelContainer.add(icon);
-        const label = this.add.text(offset + index * (iconSize + padding) + iconSize / 2, rowY + iconSize + 4, 'P', {
-          fontSize: '10px', color: '#a4ff9c', fontFamily: 'Segoe UI', fontStyle: 'bold'
-        }).setOrigin(0.5, 0);
-        this.skillPanelContainer.add(label);
-        entries.push(icon, label);
-      });
-    }
-
     if (entries.length === 0) {
-      const hint = this.add.text(0, rowY, 'No skills equipped yet', {
+      const hint = this.add.text(0, 0, 'Chưa có kỹ năng nào', {
         fontSize: '12px', color: '#8a9ab0', fontFamily: 'Segoe UI'
       }).setOrigin(0, 0);
       this.skillPanelContainer.add(hint);
+      return;
     }
+
+    entries.slice(0, maxIcons).forEach((entry, index) => {
+      const col = index % cols;
+      const row = Math.floor(index / cols);
+      const x = col * cellW + iconSize / 2;
+      const y = row * cellH;
+
+      // Màu theo loại: vũ khí = xanh dương, evolution = vàng/tím lấp lánh, passive = xanh lá.
+      let borderColor, fillColor, glow;
+      if (entry.kind === 'evolution') { borderColor = 0xffd166; fillColor = 0x2a2040; glow = true; }
+      else if (entry.kind === 'passive') { borderColor = 0x6bcf7f; fillColor = 0x18291d; glow = false; }
+      else { borderColor = 0x6cb0ff; fillColor = 0x142238; glow = false; }
+
+      // Glow nhẹ phía sau icon evolution để nổi bật hơn các skill thường.
+      if (glow) {
+        const glowRect = this.add.rectangle(x, y + iconSize / 2, iconSize + 10, iconSize + 10, 0xffd166, 0.22)
+          .setOrigin(0.5);
+        this.skillPanelContainer.add(glowRect);
+        this.tweens.add({
+          targets: glowRect, alpha: { from: 0.12, to: 0.3 }, duration: 850, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+        });
+      }
+
+      const slotBg = this.add.rectangle(x, y + iconSize / 2, iconSize + 6, iconSize + 6, fillColor, 0.95)
+        .setOrigin(0.5).setStrokeStyle(1.5, borderColor, 0.95).setInteractive({ useHandCursor: true });
+      this.skillPanelContainer.add(slotBg);
+
+      const iconKey = entry.kind === 'passive' ? 'icon_pas_' + entry.id : 'icon_' + entry.id;
+      let icon;
+      if (this.textures.exists(iconKey)) {
+        icon = this.add.image(x, y + iconSize / 2, iconKey).setDisplaySize(iconSize, iconSize);
+      } else {
+        icon = this.add.rectangle(x, y + iconSize / 2, iconSize - 4, iconSize - 4, borderColor, 0.35);
+      }
+      this.skillPanelContainer.add(icon);
+
+      // Thanh tiến trình cấp độ mỏng ngay dưới icon (chỉ cho vũ khí/evolution, có maxLevel rõ ràng).
+      const def = getWeaponData ? getWeaponData(entry.id) : null;
+      const maxLv = def && def.maxLevel ? def.maxLevel : null;
+      if (entry.level && maxLv) {
+        const barW = iconSize + 4;
+        const barBg = this.add.rectangle(x, y + iconSize + 6, barW, 3, 0x0c1524, 1).setOrigin(0.5);
+        const pct = Phaser.Math.Clamp(entry.level / maxLv, 0, 1);
+        const barFill = this.add.rectangle(x - barW / 2, y + iconSize + 6, barW * pct, 3, borderColor, 1).setOrigin(0, 0.5);
+        this.skillPanelContainer.add([barBg, barFill]);
+        const lv = this.add.text(x, y + iconSize + 11, entry.level + '/' + maxLv, {
+          fontSize: '9px', color: '#c7d2ee', fontFamily: 'Segoe UI'
+        }).setOrigin(0.5, 0);
+        this.skillPanelContainer.add(lv);
+      } else if (entry.kind === 'passive') {
+        const lv = this.add.text(x, y + iconSize + 6, 'P', {
+          fontSize: '9px', color: '#a4ff9c', fontFamily: 'Segoe UI', fontStyle: 'bold'
+        }).setOrigin(0.5, 0);
+        this.skillPanelContainer.add(lv);
+      }
+
+      // Tooltip: tên + mô tả, hiện khi hover (desktop) hoặc chạm (mobile).
+      const meta = entry.kind === 'passive'
+        ? (typeof PASSIVES !== 'undefined' ? PASSIVES[entry.id] : null)
+        : def;
+      const title = meta ? meta.name : entry.id;
+      const desc = meta ? (meta.description || '') : '';
+      const levelLine = entry.level ? (maxLv ? `Cấp ${entry.level}/${maxLv}` : `Cấp ${entry.level}`) : '';
+      const fullDesc = levelLine ? `${levelLine}\n${desc}` : desc;
+
+      slotBg.on('pointerover', () => this.showSkillTooltip(x, y, title, fullDesc, borderColor));
+      slotBg.on('pointerout', () => this.hideSkillTooltip());
+      slotBg.on('pointerdown', () => this.showSkillTooltip(x, y, title, fullDesc, borderColor, true));
+    });
+  }
+
+  // Hiện tooltip nhỏ ngay trên icon skill được hover/tap. autoHide=true dùng cho mobile (tự ẩn sau 2.2s).
+  showSkillTooltip(localX, localY, title, desc, colorHex, autoHide = false) {
+    if (!this.skillTooltipBg) return;
+    if (this._skillTooltipHideEvent) { this._skillTooltipHideEvent.remove(); this._skillTooltipHideEvent = null; }
+
+    const containerX = this.skillPanelContainer.x;
+    const containerY = this.skillPanelContainer.y;
+    const worldX = containerX + localX;
+    const worldY = containerY + localY - 6;
+
+    this.skillTooltipTitle.setText(title).setColor('#' + colorHex.toString(16).padStart(6, '0'));
+    this.skillTooltipDesc.setText(desc);
+
+    const padX = 10, padY = 8, gap = 3;
+    const contentW = Math.max(this.skillTooltipTitle.width, this.skillTooltipDesc.width);
+    const contentH = this.skillTooltipTitle.height + gap + this.skillTooltipDesc.height;
+    const boxW = contentW + padX * 2;
+    const boxH = contentH + padY * 2;
+
+    // Giữ tooltip trong màn hình (không tràn mép trái/phải).
+    let boxX = Phaser.Math.Clamp(worldX - boxW / 2, 8, this.scale.width - boxW - 8);
+    const boxBottomY = worldY;
+
+    this.skillTooltipBg.setPosition(boxX, boxBottomY).setSize(boxW, boxH).setVisible(true);
+    this.skillTooltipDesc.setPosition(boxX + padX, boxBottomY - padY).setVisible(true);
+    this.skillTooltipTitle.setPosition(boxX + padX, boxBottomY - padY - this.skillTooltipDesc.height - gap).setVisible(true);
+
+    if (autoHide) {
+      this._skillTooltipHideEvent = this.time.delayedCall(2200, () => this.hideSkillTooltip());
+    }
+  }
+
+  hideSkillTooltip() {
+    if (!this.skillTooltipBg) return;
+    this.skillTooltipBg.setVisible(false);
+    this.skillTooltipTitle.setVisible(false);
+    this.skillTooltipDesc.setVisible(false);
+    if (this._skillTooltipHideEvent) { this._skillTooltipHideEvent.remove(); this._skillTooltipHideEvent = null; }
   }
 
   // ===== PAUSE UI =====
@@ -2287,13 +2710,22 @@ class GameScene extends Phaser.Scene {
 
     if (this.pauseContainer) this.pauseContainer.destroy();
     this.pauseContainer = this.add.container(0, 0).setDepth(300);
+    // Các phần tử con (Text/hit) thuộc những nút ghép nhiều lớp (gradient
+    // graphics + icon + label + hit) — loại khỏi animation scale-theo-vị-trí
+    // ở cuối hàm để tránh tách lớp khỏi nền nút khi overshoot (xem cuối hàm).
+    this._pauseButtonParts = [];
 
     // Nền tối + thẻ trung tâm
-    const overlay = this.add.rectangle(cx, topY + h / 2, w, h, 0x05070d, 0.86);
+    const overlay = this.add.rectangle(cx, topY + h / 2, w, h, 0x05070d, 0.86).setAlpha(0);
     const cardH = Math.min(560, h - 28);
-    const card = this.add.rectangle(cx, topY + h / 2, Math.min(760, w - 32), cardH, 0x111827, 0.98)
+    const cardW = Math.min(760, w - 32);
+
+    // Shadow đổ nhẹ phía sau thẻ để tạo chiều sâu.
+    const cardShadow = this.add.rectangle(cx, topY + h / 2 + 8, cardW, cardH, 0x000000, 0.35);
+
+    const card = this.add.rectangle(cx, topY + h / 2, cardW, cardH, 0x111827, 0.98)
       .setStrokeStyle(2, 0x4b5f91, 0.9);
-    this.pauseContainer.add([overlay, card]);
+    this.pauseContainer.add([overlay, cardShadow, card]);
 
     const title = this.add.text(cx, topY + 42, 'TẠM DỪNG', {
       fontSize: '30px', color: '#ffffff', fontStyle: 'bold', fontFamily: font
@@ -2372,35 +2804,121 @@ class GameScene extends Phaser.Scene {
     this.pauseContainer.add(this.pauseSaveStatus);
 
     const btnY = Math.min(topY + h - 86, Math.max(listBottom + 52, statusY + 34));
-    const makeBtn = (x, label, bgColor, hoverColor, onClick) => {
-      const btn = this.add.rectangle(x, btnY, 150, 46, bgColor, 1)
-        .setStrokeStyle(2, 0xffffff, 0.18)
-        .setInteractive({ useHandCursor: true });
-      const txt = this.add.text(x, btnY, label, {
+
+    // Nút bo góc kiểu "gradient" giả lập bằng graphics: lớp đáy tối hơn +
+    // lớp trên sáng hơn tạo cảm giác chiều sâu, cộng shadow đổ phía dưới
+    // và icon minh hoạ hành động.
+    const BTN_W = 150, BTN_H = 46, BTN_R = 12;
+    const makeBtn = (x, label, icon, colorTop, colorBottom, hoverTop, hoverBottom, onClick) => {
+      const shadow = this.add.graphics();
+      shadow.fillStyle(0x000000, 0.35);
+      shadow.fillRoundedRect(-BTN_W / 2, -BTN_H / 2 + 4, BTN_W, BTN_H, BTN_R);
+      shadow.setPosition(x, btnY);
+
+      // g được vẽ tại gốc cục bộ (0,0) rồi setPosition ra vị trí thật, để
+      // setScale() (dùng khi hover/click) phóng to đúng quanh tâm nút thay
+      // vì lệch tâm — vẽ trực tiếp bằng toạ độ tuyệt đối trước đây khiến
+      // graphics phình ra không đối xứng, "tràn" xuống/qua nút bên cạnh.
+      const g = this.add.graphics();
+      const drawFace = (top, bottom) => {
+        g.clear();
+        g.fillGradientStyle(top, top, bottom, bottom, 1);
+        g.fillRoundedRect(-BTN_W / 2, -BTN_H / 2, BTN_W, BTN_H, BTN_R);
+        g.lineStyle(1.5, 0xffffff, 0.22);
+        g.strokeRoundedRect(-BTN_W / 2, -BTN_H / 2, BTN_W, BTN_H, BTN_R);
+      };
+      drawFace(colorTop, colorBottom);
+      g.setPosition(x, btnY);
+
+      const iconT = this.add.text(x - BTN_W / 2 + 24, btnY, icon, {
+        fontSize: '16px', color: '#ffffff', fontStyle: 'bold', fontFamily: font
+      }).setOrigin(0.5);
+
+      const txt = this.add.text(x + 10, btnY, label, {
         fontSize: '15px', color: '#ffffff', fontStyle: 'bold', fontFamily: font
       }).setOrigin(0.5);
-      btn.on('pointerover', () => btn.setFillStyle(hoverColor, 1));
-      btn.on('pointerout', () => btn.setFillStyle(bgColor, 1));
-      btn.on('pointerdown', onClick);
-      this.pauseContainer.add([btn, txt]);
-      return btn;
+
+      const hit = this.add.rectangle(x, btnY, BTN_W, BTN_H, 0xffffff, 0.001)
+        .setInteractive({ useHandCursor: true });
+
+      // icon/label scale quanh tâm chữ riêng của chúng (setOrigin 0.5 đã lo
+      // việc đó) nên không cần setPosition đặc biệt — chỉ g cần vì nó vẽ
+      // hình chữ nhật lệch tâm gốc.
+      hit.on('pointerover', () => {
+        drawFace(hoverTop, hoverBottom);
+        this.tweens.add({ targets: [g, iconT, txt], scale: 1.04, duration: 90, ease: 'Sine.easeOut' });
+      });
+      hit.on('pointerout', () => {
+        drawFace(colorTop, colorBottom);
+        this.tweens.add({ targets: [g, iconT, txt], scale: 1, duration: 90, ease: 'Sine.easeOut' });
+      });
+      hit.on('pointerdown', () => {
+        this.tweens.add({
+          targets: [g, iconT, txt], scale: 0.94, duration: 60, ease: 'Sine.easeOut',
+          yoyo: true, onComplete: () => onClick()
+        });
+      });
+
+      this.pauseContainer.add([shadow, g, iconT, txt, hit]);
+      this._pauseButtonParts.push(iconT, txt, hit);
+      return { g, iconT, txt, hit, shadow };
     };
 
-    makeBtn(cx - 170, 'TIẾP TỤC', 0x28613d, 0x347a4d, () => this.togglePause());
-    makeBtn(cx, 'CHƠI LẠI', 0x67551b, 0x80691f, () => this.confirmResetGame());
-    makeBtn(cx + 170, 'THOÁT', 0x6a2828, 0x833535, () => this.confirmExitGame());
+    makeBtn(cx - 170, 'TIẾP TỤC', '\u25B6', 0x2f7a4c, 0x1e4d2e, 0x3a9660, 0x275c38, () => this.togglePause());
+    makeBtn(cx, 'CHƠI LẠI', '\u27F2', 0x8a7124, 0x5c4b18, 0xa88a2c, 0x6f5a1d, () => this.confirmResetGame());
+    makeBtn(cx + 170, 'THOÁT', '\u2715', 0x8a3838, 0x5c2222, 0xa84545, 0x6f2b2b, () => this.confirmExitGame());
 
-    // Nút Cloud Save riêng, không dùng emoji để tránh lỗi font.
-    const saveBg = this.add.rectangle(cx, btnY + 58, 190, 32, 0x1d3557, 1)
-      .setStrokeStyle(1, 0x6c9ee8, 0.7)
-      .setInteractive({ useHandCursor: true });
-    const saveTxt = this.add.text(cx, btnY + 58, 'LƯU CLOUD NGAY', {
+    // Nút Cloud Save dùng chung style bo góc/gradient/icon với 3 nút chính
+    // ở trên, thay vì rectangle phẳng riêng biệt như trước (tránh lệch tông
+    // và tránh chồng hình khi animation pop-in chạy).
+    const CLOUD_BTN_W = 220, CLOUD_BTN_H = 36, CLOUD_BTN_R = 10;
+    const cloudY = btnY + 58;
+    const cloudShadow = this.add.graphics();
+    cloudShadow.fillStyle(0x000000, 0.3);
+    cloudShadow.fillRoundedRect(-CLOUD_BTN_W / 2, -CLOUD_BTN_H / 2 + 3, CLOUD_BTN_W, CLOUD_BTN_H, CLOUD_BTN_R);
+    cloudShadow.setPosition(cx, cloudY);
+
+    // cloudG vẽ tại gốc cục bộ (0,0) rồi setPosition, cùng lý do như g ở
+    // makeBtn: setScale khi hover phải phóng to quanh tâm nút, không lệch.
+    const cloudG = this.add.graphics();
+    const drawCloudFace = (top, bottom) => {
+      cloudG.clear();
+      cloudG.fillGradientStyle(top, top, bottom, bottom, 1);
+      cloudG.fillRoundedRect(-CLOUD_BTN_W / 2, -CLOUD_BTN_H / 2, CLOUD_BTN_W, CLOUD_BTN_H, CLOUD_BTN_R);
+      cloudG.lineStyle(1.5, 0x6c9ee8, 0.6);
+      cloudG.strokeRoundedRect(-CLOUD_BTN_W / 2, -CLOUD_BTN_H / 2, CLOUD_BTN_W, CLOUD_BTN_H, CLOUD_BTN_R);
+    };
+    drawCloudFace(0x2a4a78, 0x18304f);
+    cloudG.setPosition(cx, cloudY);
+
+    const cloudIcon = this.add.text(cx - CLOUD_BTN_W / 2 + 22, cloudY, '\u2601', {
+      fontSize: '15px', color: '#bcdcff', fontFamily: font
+    }).setOrigin(0.5);
+
+    const saveTxt = this.add.text(cx + 8, cloudY, 'LƯU CLOUD NGAY', {
       fontSize: '12px', color: '#d9e9ff', fontStyle: 'bold', fontFamily: font
     }).setOrigin(0.5);
-    saveBg.on('pointerover', () => saveBg.setFillStyle(0x294b78, 1));
-    saveBg.on('pointerout', () => saveBg.setFillStyle(0x1d3557, 1));
-    saveBg.on('pointerdown', () => this.saveCloudGame());
-    this.pauseContainer.add([saveBg, saveTxt]);
+
+    const saveHit = this.add.rectangle(cx, cloudY, CLOUD_BTN_W, CLOUD_BTN_H, 0xffffff, 0.001)
+      .setInteractive({ useHandCursor: true });
+
+    saveHit.on('pointerover', () => {
+      drawCloudFace(0x365d92, 0x1f3b60);
+      this.tweens.add({ targets: [cloudG, cloudIcon, saveTxt], scale: 1.03, duration: 90, ease: 'Sine.easeOut' });
+    });
+    saveHit.on('pointerout', () => {
+      drawCloudFace(0x2a4a78, 0x18304f);
+      this.tweens.add({ targets: [cloudG, cloudIcon, saveTxt], scale: 1, duration: 90, ease: 'Sine.easeOut' });
+    });
+    saveHit.on('pointerdown', () => {
+      this.tweens.add({
+        targets: [cloudG, cloudIcon, saveTxt], scale: 0.95, duration: 60, ease: 'Sine.easeOut',
+        yoyo: true, onComplete: () => this.saveCloudGame()
+      });
+    });
+
+    this.pauseContainer.add([cloudShadow, cloudG, cloudIcon, saveTxt, saveHit]);
+    this._pauseButtonParts.push(cloudIcon, saveTxt, saveHit);
 
     const continueNote = this.add.text(cx, btnY + 88,
       'Game đã tự động lưu. Vào PROFILE để tải Cloud Save.', {
@@ -2411,6 +2929,59 @@ class GameScene extends Phaser.Scene {
       wordWrap: { width: Math.min(520, w - 40) }
     }).setOrigin(0.5);
     this.pauseContainer.add(continueNote);
+
+    // ===== Animation pop-in khi mở menu =====
+    // Overlay tối chỉ fade nhanh; nội dung thẻ (mọi thứ khác trong
+    // container) scale-in nhẹ kèm fade từ tâm thẻ, tạo cảm giác "bật lên".
+    this.tweens.add({
+      targets: overlay,
+      alpha: 1,
+      duration: 160,
+      ease: 'Sine.easeOut'
+    });
+
+    const cardCenterX = cx;
+    const cardCenterY = topY + h / 2;
+    const popTargets = this.pauseContainer.list.filter(o => o !== overlay);
+    popTargets.forEach(o => {
+      if (typeof o.setAlpha === 'function') o.setAlpha(0);
+    });
+
+    // Graphics (shadow/nút bo góc) được vẽ bằng toạ độ tuyệt đối nên
+    // setScale trên chính nó sẽ scale lệch tâm — chỉ fade các phần tử này,
+    // không scale. Các nút ghép từ nhiều phần tử (Graphics nền + Text +
+    // hit rectangle trong suốt) cũng bị loại khỏi scale-theo-vị-trí vì mỗi
+    // phần tử con sẽ overshoot khác nhau và tách lớp khỏi nhau — chỉ những
+    // phần tử "đơn" (Text/Image/Rectangle độc lập, không thuộc 1 nút ghép)
+    // mới được scale quanh tâm thẻ để tạo hiệu ứng "bật lên".
+    const noScaleSet = new Set([
+      ...popTargets.filter(o => o.type === 'Graphics'),
+      ...(this._pauseButtonParts || [])
+    ]);
+    const scaleTargets = popTargets.filter(o => typeof o.setScale === 'function' && !noScaleSet.has(o));
+
+    this.pauseContainer.setAlpha(1);
+    const scaleHolder = { s: 0.85 };
+    this.tweens.add({
+      targets: scaleHolder,
+      s: 1,
+      duration: 220,
+      ease: 'Back.easeOut',
+      onUpdate: () => {
+        scaleTargets.forEach(o => {
+          if (o._popBaseX === undefined) { o._popBaseX = o.x; o._popBaseY = o.y; }
+          o.x = cardCenterX + (o._popBaseX - cardCenterX) * scaleHolder.s;
+          o.y = cardCenterY + (o._popBaseY - cardCenterY) * scaleHolder.s;
+          o.setScale(scaleHolder.s);
+        });
+      }
+    });
+    this.tweens.add({
+      targets: popTargets,
+      alpha: 1,
+      duration: 180,
+      ease: 'Sine.easeOut'
+    });
   }
 
   setPauseSaveStatus(text, success) {
@@ -2419,12 +2990,51 @@ class GameScene extends Phaser.Scene {
     this.pauseSaveStatus.setColor(success ? '#8dffb0' : '#ffd08a');
   }
 
+  // Thông báo nổi ngắn ở giữa màn hình (vd: báo load Cloud Save thành công).
+  showToast(text, success = true) {
+    const w = this.scale.width;
+    const font = 'Arial, Tahoma, sans-serif';
+
+    const bg = this.add.rectangle(w / 2, 70, 10, 40, 0x0b1626, 0.88)
+      .setScrollFactor(0).setDepth(500).setStrokeStyle(1, success ? 0x4ee08a : 0xe0a24e, 0.9);
+    const txt = this.add.text(w / 2, 70, text, {
+      fontFamily: font,
+      fontSize: '14px',
+      fontStyle: 'bold',
+      color: success ? '#8dffb0' : '#ffd08a'
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(501);
+
+    bg.setSize(txt.width + 36, txt.height + 18);
+
+    this.tweens.add({
+      targets: [bg, txt],
+      alpha: { from: 0, to: 1 },
+      duration: 200,
+      ease: 'Sine.easeOut',
+      onComplete: () => {
+        this.time.delayedCall(1800, () => {
+          this.tweens.add({
+            targets: [bg, txt],
+            alpha: 0,
+            duration: 400,
+            ease: 'Sine.easeIn',
+            onComplete: () => {
+              bg.destroy();
+              txt.destroy();
+            }
+          });
+        });
+      }
+    });
+  }
+
   hidePauseMenu() {
     if (this.pauseContainer) {
       this.pauseContainer.destroy();
       this.pauseContainer = null;
     }
     this.pauseSaveStatus = null;
+    this._pauseButtonParts = null;
   }
 
   // Bấm 1 lần sẽ đổi nút thành "Xác nhận?" để tránh out/reset nhầm, bấm lần 2 mới thực thi.

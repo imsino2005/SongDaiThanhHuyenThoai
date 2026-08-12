@@ -171,7 +171,7 @@ const LEVELUP_CHOICES = 3;
 
 // ====================== HP REGEN / DROP CONFIG ======================
 const HP_REGEN_PER_SEC = 1;       // tất cả class tự hồi 1 máu mỗi giây
-const MAGNET_DROP_CHANCE = 0.05;  // quái thường: 5% rớt ra Nam Châm (hút hết EXP chưa lụm)
+const MAGNET_DROP_CHANCE = 0.01;  // quái thường: 1% rớt ra Nam Châm (hút hết EXP chưa lụm)
 const CHEST_ROLL_CHOICES = 3;     // số passive để chọn khi mở rương boss
 
 // ====================== EXP TUNING ======================

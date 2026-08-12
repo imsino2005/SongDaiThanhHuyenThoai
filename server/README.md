@@ -23,6 +23,8 @@ REST API for Vampire Survivors clone with Azure SQL Database, Azure Blob Storage
 
 - `POST /api/auth/register`
 - `POST /api/auth/login`
+- `POST /api/auth/forgot-password`
+- `POST /api/auth/reset-password`
 - `GET /api/profile`
 - `PATCH /api/profile`
 - `POST /api/cloud-saves`
@@ -39,6 +41,31 @@ REST API for Vampire Survivors clone with Azure SQL Database, Azure Blob Storage
 
 - Protected routes require `Authorization: Bearer <token>`.
 - Uses Application Insights when `APPINSIGHTS_INSTRUMENTATIONKEY` is set.
+
+## Quên mật khẩu (gửi mã 6 số qua Gmail)
+
+Tính năng `POST /api/auth/forgot-password` + `POST /api/auth/reset-password` dùng
+Gmail SMTP để gửi mã xác nhận, thông qua thư viện `nodemailer`.
+
+1. Bật xác thực 2 bước (2FA) cho tài khoản Gmail sẽ dùng để gửi mail.
+2. Vào https://myaccount.google.com/apppasswords, tạo 1 **App Password** mới
+   (chọn app "Mail", thiết bị đặt tên tuỳ ý, ví dụ "VS Game Server").
+3. Google trả về 1 chuỗi 16 ký tự — copy chuỗi đó (bỏ khoảng trắng nếu có).
+4. Thêm 2 biến môi trường vào `.env` (hoặc Azure App Service → Configuration):
+   ```
+   GMAIL_USER=your-account@gmail.com
+   GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
+   ```
+5. Chạy migration mới để thêm cột lưu mã reset vào bảng `User`:
+   ```bash
+   npx sequelize-cli db:migrate
+   ```
+
+Lưu ý: Gmail SMTP miễn phí có giới hạn khoảng ~500 email/ngày/tài khoản — đủ dùng
+cho quy mô nhỏ/vừa. Nếu lượng người dùng lớn hơn, cân nhắc chuyển sang dịch vụ
+email chuyên dụng (SendGrid, Mailgun, Azure Communication Services) sau này —
+chỉ cần thay nội dung `server/services/mailer.js`, phần route không đổi.
+
 
 ## Azure Blob Storage
 
